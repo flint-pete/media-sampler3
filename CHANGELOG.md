@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **image-sampler2** are recorded here.
+All notable changes to **media-sampler3** are recorded here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project (once it diverges from the upstream baseline) will aim to follow
@@ -14,6 +14,26 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Added
+- **Forked from image-sampler2 v0.5.1 as media-sampler3** (2026-07-15). New plugin
+  lineage: a more versatile producer that captures BOTH JPEG frames AND audio clips
+  into the shared `/local-cache` using the same v2 self-describing cache-frame
+  contract. Baseline = image-sampler2 `main`@692a2cd / v0.5.1 (46 files, unit suite
+  170 passed / 8 skipped), copied verbatim then renamed. See
+  `docs/AUDIO-EXTENSION-DESIGN.md` for the audio-producer design and locked decisions.
+
+### Changed
+- **Renamed image-sampler2 → media-sampler3 throughout**, including published
+  interfaces (clean break — no existing media-sampler3 subscribers):
+  - `SCHEMA_VERSION`: `sage-img-1` → `sage-media-1` (now spans image + audio).
+  - Heartbeat measurement topics: `env.imagesampler.cache.*` →
+    `env.mediasampler.cache.*`.
+  - Registry image: `beckman/image-sampler2` → `beckman/media-sampler3`.
+  - Version lineage restarts at `0.1.0`.
+  Logger names, docstrings, README, job YAMLs, Dockerfile, Makefile, and file names
+  (`README.md`, `docs/mediasampler.analysis.txt`, the CI workflow) updated in
+  lockstep; suite re-verified green (170 passed / 8 skipped) post-rename.
+
+### Inherited from image-sampler2 v0.5.1 (baseline)
 - **Runtime node identity from the WES-injected env vars.** `nodemeta._runtime_identity()`
   now reads the five `WAGGLE_NODE_*` env vars that the WES `wes-nodeinfo-injection`
   change projects into every plugin pod via `envFrom: wes-identity`
@@ -24,7 +44,7 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
   `_runtime_identity()` and the return-dict shape is unchanged, so `resolve_identity`,
   the v2 filename, EXIF GPS, and upload meta consume it unchanged. Precedence is
   still explicit CLI arg > runtime env > manifest/`/etc/waggle` (host-only fallback).
-  - **Verified live on H00F (2026-07-12):** image-sampler2 side-loaded with the 5
+  - **Verified live on H00F (2026-07-12):** media-sampler3 side-loaded with the 5
     identity vars injected produced `1783…-v2-H00F-top_camera.jpg` whose EXIF carried
     `Model=H00F` and GPS `lat=41.7179852778, lon=-87.9827151389` (H00F's real surveyed
     location), with upload meta `vsn=H00F, node_id=00004cbb4701d16c` — every value
@@ -98,7 +118,7 @@ default 0 = unbounded (forever behavior preserved). Verified on-node against H00
   - Verified with a real clock/sleep: `--max-count 3` captured exactly 3 frames on
     the 1s grid and self-exited 0 in ~2s. 229 tests pass.
 - Stage 3.3c: ON-NODE self-exit verification on H00F (Thor), built/imported as
-  image-sampler2:0.5.0-rc. `--continuous 8 --max-runtime 30` captured 5 real
+  media-sampler3:0.5.0-rc. `--continuous 8 --max-runtime 30` captured 5 real
   hummingcam frames on the 8s grid (t=0,8,16,24,32s) then CLEANLY SELF-EXITED at
   the first capture edge past the 30s bound — the pod reached a terminal completed
   state and was reaped (not killed, not crash-looped). Producer ran as a bounded,
@@ -138,7 +158,7 @@ loop. Ships a turnkey producer+uploader job pair. Verified on-node against H00F
     newest, preserves the original capture-ts, carries embedded unique_id, and
     leaves the cache untouched. 214 tests pass.
 - Stage 6d: ON-NODE verification on H00F (Thor), built/imported as
-  image-sampler2:0.4.0-rc. Ran the composed loop via pluginctl:
+  media-sampler3:0.4.0-rc. Ran the composed loop via pluginctl:
   - PRODUCER (--continuous, live hummingcam) filled a host-mounted ring with 3
     real ~1.3MB frames (newest capture_ts 1783384382979952981).
   - UPLOADER (--one-shot --from-cache /cache/h00f-s6/top) selected the NEWEST,
@@ -160,7 +180,7 @@ Stage 5: continuous-mode cache HEARTBEAT (design §3.2) — the sole liveness si
 for `--continuous` (local-only, so no upload record implies "alive"). Fires on its
 own monotonic grid decoupled from the capture cadence, even when captures fail
 (the "running but silent" case). Verified on-node against H00F, including the
-dead-camera liveness case and data-plane delivery of env.imagesampler.cache.*.
+dead-camera liveness case and data-plane delivery of env.mediasampler.cache.*.
 
 ### Added
 - Stage 5 (s5a–s5c): continuous-mode cache HEARTBEAT — the sole liveness signal
@@ -177,11 +197,11 @@ dead-camera liveness case and data-plane delivery of env.imagesampler.cache.*.
   - Wired into `_continuous_to_cache`: opens a pywaggle Plugin (fail-SOFT — if
     unavailable, the cache still runs without heartbeats), accumulates
     written/evicted/last_status per beat, and publishes on the heartbeat grid:
-      * `env.imagesampler.cache.count`   (ring image count)
-      * `env.imagesampler.cache.bytes`   (ring total bytes)
-      * `env.imagesampler.cache.written` (images written since last beat, delta)
-      * `env.imagesampler.cache.evicted` (images evicted since last beat, delta)
-      * `env.imagesampler.cache.last_status` ("ok"/"skip"/"fail"/"none")
+      * `env.mediasampler.cache.count`   (ring image count)
+      * `env.mediasampler.cache.bytes`   (ring total bytes)
+      * `env.mediasampler.cache.written` (images written since last beat, delta)
+      * `env.mediasampler.cache.evicted` (images evicted since last beat, delta)
+      * `env.mediasampler.cache.last_status` ("ok"/"skip"/"fail"/"none")
     with `meta={cache_name, camera, vsn}` (all strings). Fires even when every
     capture fails (the "running but silent" case). Publish is fail-soft (a broken
     broker never kills the loop). +10 wiring/CLI tests.
@@ -191,7 +211,7 @@ dead-camera liveness case and data-plane delivery of env.imagesampler.cache.*.
     on the independent grid with correct delta reset; ring stays bounded; password
     redacted. 201 tests pass.
 - Stage 5d: ON-NODE verification on H00F (Thor), built/imported as
-  image-sampler2:0.3.0-rc (Dockerfile now COPYs heartbeat.py). Two runs via
+  media-sampler3:0.3.0-rc (Dockerfile now COPYs heartbeat.py). Two runs via
   `sudo pluginctl run --selector zone=core --env-from <creds> -v <host>:/cache`:
   - HAPPY PATH (live hummingcam, interval=10s, --heartbeat-secs 15, cap=3):
     STAGE 5 beats fired on the independent 15s grid (not the 10s capture grid),
@@ -202,7 +222,7 @@ dead-camera liveness case and data-plane delivery of env.imagesampler.cache.*.
     capture failed ("Connection refused") yet heartbeats KEPT FIRING on the 10s
     grid with count=0/status=skip — the "running but silent" liveness case the
     heartbeat exists to reveal, proven live.
-  - DATA-PLANE: `env.imagesampler.cache.*` records are queryable from the Sage
+  - DATA-PLANE: `env.mediasampler.cache.*` records are queryable from the Sage
     data API (data.sagecontinuum.org). Beehive attached identity downstream
     (vsn=H00F, node=00004cbb...) to our in-pod placeholder vsn=NODE, exactly as
     designed; meta carries cache_name/camera + Beehive host/job/plugin/task/zone.
@@ -240,7 +260,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
     test ran as a side-loaded pod in `default`, never touched `ses`. Node cleaned
     (pod removed, scratch dir + creds file + build checkout deleted).
   - Dockerfile fix: COPY now includes capture.py + cache.py (Stage-4 modules) —
-    verified imports load in-container. Built/imported as image-sampler2:0.2.0-rc.
+    verified imports load in-container. Built/imported as media-sampler3:0.2.0-rc.
 - Stage 4c: `--continuous` producer loop wired end-to-end (design 2.2 + 2.6).
   - `app.run_capture_loop()`: monotonic-grid scheduler with skip-on-overrun; clock
     + sleep injectable for deterministic tests (fake clock).
@@ -311,7 +331,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
     Beehive data API: record timestamp == capture_timestamp == filename prefix
     (capture-time keying); filename used placeholder vsn "NODE" yet Beehive meta
     correctly shows {"vsn":"H00F","node":"00004cbb4701d16c"}; all string meta
-    (unique_id/upload_timestamp/acquisition_path/schema_version=sage-img-1) present.
+    (unique_id/upload_timestamp/acquisition_path/schema_version=sage-media-1) present.
 - Stage 3 (one-shot upload path; first end-to-end Beehive result). Verified on
   H00F 2026-07-06.
   - upload.py one_shot_upload(): grab -> embed -> pywaggle upload_file(path, meta,
@@ -485,7 +505,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
   tagged parts with a legend ([LOCKED]/[VERIFIED]/[REQUIREMENT]/[OPEN]/[DEFERRED]):
   Part I upstream code study (all VERIFIED findings preserved: pywaggle naming,
   RTSP timestamp semantics, metadata evidence, uniqueness + coarse-clock analysis),
-  Part II image-sampler2 design (13 locked subsections incl. producer/consumer
+  Part II media-sampler3 design (13 locked subsections incl. producer/consumer
   architecture, modes, acquisition mandate, ring cache, Q0/from-cache, timestamps,
   v2 naming, EXIF, shared cache, back-dated-ts verification), Part III requirements
   carried forward (fail-soft loop, heartbeat, self-exit, format/quality, deps,
@@ -501,7 +521,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
 ### Fixed
 - Analysis Section 3: corrected a dangling "see pitfalls" cross-reference (no such
   section ever existed) to point at Section 4 (Shortcomings), the shared sample.jpg
-  race. Added an image-sampler2 RESOLUTION note documenting that the upstream save
+  race. Added an media-sampler3 RESOLUTION note documenting that the upstream save
   pitfalls are already designed out: the sample.jpg race is eliminated by per-stream
   v2 filenames (Sec 13) + per-stream cache subdirs (Sec 15) + atomic temp->rename
   (Sec 15), and the upload-vs-local mutual exclusivity is replaced by the one-shot/
@@ -510,7 +530,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
 ### Added
 - Analysis: Q0 RESOLVED + --from-cache source (LOCKED). --continuous is STRICTLY
   LOCAL-ONLY (never uploads); the cache is its sole sink and uploading is a
-  consumer concern. This unlocks the producer/consumer architecture: image-sampler2
+  consumer concern. This unlocks the producer/consumer architecture: media-sampler3
   (CPU) fills the shared cache continuously; consumer plugins load a model ONCE,
   batch-infer N cached images, upload the interesting ones, unload, and free the
   GPU (BioClip amortization ~11.4s/img -> ~2.04s/img at N=10, GPU freed after) —
@@ -570,12 +590,12 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
 - Analysis Section 10: coarse-clock/coarse-timestamp finding. Diagnosed W096's
   whole-second upload timestamps to file-forager stamping by source-file mtime
   (not time_ns()) and reusing one second across multiple artifacts — a
-  plugin-level provenance issue outside image-sampler2/pywaggle. Flagged as an
+  plugin-level provenance issue outside media-sampler3/pywaggle. Flagged as an
   upstream action item (raise with file-forager author / Sage data conventions).
 - Analysis Section 11: camera-metadata vendor-interface study + live evidence.
   Marker-scanned three real frames: Reolink snapshot (no metadata; camera authors
   none), Mobotix via mobotix-scan (stripped — libav re-encode, only a Lavc tag),
-  and Mobotix via imagesampler-mobotix (FULL M1IMG fingerprint + MXF block
+  and Mobotix via mediasampler-mobotix (FULL M1IMG fingerprint + MXF block
   preserved). Documents Reolink/Hanwha/Mobotix acquisition interfaces and decodes
   the Mobotix fingerprint (manufacturer, ms capture time+TZ, per-sensor geometry/
   exposure telemetry).
@@ -595,11 +615,11 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
   stored and retrievable at their back-dated time. So a capture-time record
   timestamp is safe at the data layer. (Check 2) slack-hummingbird watcher uses a
   FIXED 120s relative lookback (safe pattern, not a max-ts cursor), so it won't
-  permanently drop back-dated records; the image-sampler2 capture-time switch
+  permanently drop back-dated records; the media-sampler3 capture-time switch
   affects image-upload records (already tolerated via the 240s deferred image
   queue), not the near-real-time detection records the watcher polls. Follow-up
   only if inference plugins later adopt capture-time: widen detection lookback to
-  >=300s. Section 13 production prerequisite CLEARED for image-sampler2.
+  >=300s. Section 13 production prerequisite CLEARED for media-sampler3.
 
 ### Changed
 - Design (EXIF field set, Section 12 — LOCKED): Option C hybrid — standard EXIF
@@ -639,10 +659,10 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
 Starting point. Not a code change — recorded for provenance.
 
 ### Added
-- Exact copy of upstream `waggle-sensor/plugin-imagesampler` @ `main`
+- Exact copy of upstream `waggle-sensor/plugin-mediasampler` @ `main`
   (version 0.3.8) as the baseline. Text files sha256-verified against upstream;
   `ecr-meta` binaries size-verified.
-- `docs/imagesampler.flint.analysis.txt` — full code study (camera source,
+- `docs/mediasampler.flint.analysis.txt` — full code study (camera source,
   sampling frequency, save behavior, shortcomings, pywaggle naming + upload
   metadata mechanism, two-timestamp design, verified RTSP timestamp semantics).
-- `README-image-sampler2.md` — fork README recording baseline provenance.
+- `README-media-sampler3.md` — fork README recording baseline provenance.

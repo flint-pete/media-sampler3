@@ -9,8 +9,8 @@ Status: DRAFT for Pete review (review-first workflow). Implements analysis.txt
 uploads (§2.8). The periodic-snapshot need ("one cloud image every ~30 min") is
 met by COMPOSITION, not an upload flag on the producer:
 
-  (a) `image-sampler2 --continuous <sec> --cache-root ... --cache-name ...`  (producer)
-  (b) `image-sampler2 --one-shot --from-cache <dir>`, scheduled by SES cron
+  (a) `media-sampler3 --continuous <sec> --cache-root ... --cache-name ...`  (producer)
+  (b) `media-sampler3 --one-shot --from-cache <dir>`, scheduled by SES cron
       (`*/30 * * * *`): take the NEWEST cached image and upload it via the EXISTING
       one-shot upload path — no camera hit, no new capture, no eviction.
 

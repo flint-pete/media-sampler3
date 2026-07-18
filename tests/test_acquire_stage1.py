@@ -1,4 +1,4 @@
-# Stage 1 tests for image-sampler2 acquisition (acquire.py).
+# Stage 1 tests for media-sampler3 acquisition (acquire.py).
 #
 # PURE tests: no camera, no real network. HTTP is mocked; the filesystem uses
 # pytest's tmp_path. Verifies raw-bytes fetch, JPEG validation, atomic save,

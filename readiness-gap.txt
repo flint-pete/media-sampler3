@@ -1,4 +1,4 @@
-image-sampler2 — READINESS GAPS: what's left to be usable
+media-sampler3 — READINESS GAPS: what's left to be usable
 ==========================================================
 Snapshot: 2026-07-07, at v0.5.1 (Stage 6 + 3.3 shipped, 229 tests, verified
 on-node H00F). The CODE is essentially done and correct; "usable" in the
@@ -19,7 +19,7 @@ plugins (YOLO/BioCLIP) read it. That requires a shared, node-persistent
     clear message if the resolved cache root is not an existing, writable dir.
     (The old silent /tmp fallback was removed — it "worked" but produced frames
     no consumer pod could ever read, a footgun. See CHANGELOG [Unreleased].)
-  - So today, with no /local-cache mounted, image-sampler2 refuses to run in
+  - So today, with no /local-cache mounted, media-sampler3 refuses to run in
     continuous mode rather than producing into a black hole. The producer is
     correct and ready; it is waiting on the mount, not on a code change.
 FULL DESIGN: the wes-local-cache-manager repo (DESIGN-AND-PURPOSE.md = two-layer
@@ -77,9 +77,9 @@ LIMITER 2 — Single-vendor cameras (Infra #4.3, OPEN)
 ----------------------------------------------------------------------------------
 Only Reolink cmd=Snap implemented. Hanwha SUNAPI + Mobotix native-still builders
 spec'd but not built; OpenCV/RTSP fallback (acquire.py::capture_opencv_fallback)
-is a stub that raises. So today image-sampler2 can only talk to Reolink.
+is a stub that raises. So today media-sampler3 can only talk to Reolink.
 CONTROL: ours for Hanwha SUNAPI (mirrors Reolink) — but needs a reachable Hanwha
-to verify the MJPEG-profile / EXIF questions. This is the image-sampler2 slice of
+to verify the MJPEG-profile / EXIF questions. This is the media-sampler3 slice of
 the pywaggle2 acquisition ladder (sage-design-planning/pywaggle2-design.md §1).
 
 ----------------------------------------------------------------------------------
@@ -103,3 +103,14 @@ It is NOT yet "usable" architecturally, and the reasons are mostly UPSTREAM:
 What's genuinely OURS left to finish: cross-user permission probe (once a mount
 exists), Hanwha camera support (once we have hardware), and the resize/quality
 decision. Everything else waits on Sage.
+
+----------------------------------------------------------------------------------
+media-sampler3 PRE-PUBLISH TODO (added 2026-07-15, inherited from image-sampler2)
+----------------------------------------------------------------------------------
+Before this repo is ever pushed public, scrub the private camera LAN IP
+10.107.0.221 (appears in CHANGELOG history note, jobs/producer-continuous.yaml
+host allowlist, and tests/test_acquire_stage1.py fixture) -> placeholder
+CAMERA_IP. NOTE: the test password there is a FAKE 'pw123' (not the real cred),
+and the real SageCam! password is NOT present. Also note: the ORIGIN repo
+image-sampler2 is ALREADY PUBLIC with this same LAN IP — a pre-existing low-sev
+exposure (LAN address, not a credential) tracked separately.

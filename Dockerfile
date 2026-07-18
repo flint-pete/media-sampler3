@@ -1,4 +1,4 @@
-# image-sampler2 — CPU-only frame producer/uploader.
+# media-sampler3 — CPU-only frame producer/uploader.
 #
 # Base: python:3.12-slim (same family as the birdnet plugin, which builds cleanly
 # on the ECR Jenkins/buildkit builder). We deliberately do NOT use

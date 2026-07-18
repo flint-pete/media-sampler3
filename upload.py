@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- one-shot upload path (Stage 3).
+# media-sampler3 -- one-shot upload path (Stage 3).
 #
 # Ties Stage 1 (acquire) + Stage 2 (metadata embed) into a real Beehive upload:
 #   grab raw still -> embed EXIF/UserComment -> plugin.upload_file(timestamp=

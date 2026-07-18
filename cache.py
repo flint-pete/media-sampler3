@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- continuous-mode local ring cache (Stage 4, design 2.6).
+# media-sampler3 -- continuous-mode local ring cache (Stage 4, design 2.6).
 #
 # This module is the PRODUCER's local sink: a per-stream, bounded ring buffer of
 # v2-named JPEGs on local disk. It is PURE with respect to camera/network/pywaggle
@@ -38,7 +38,7 @@ import re
 
 import metadata
 
-logger = logging.getLogger("image-sampler2.cache")
+logger = logging.getLogger("media-sampler3.cache")
 
 # MB is decimal (10^6) per 2.6.
 BYTES_PER_MB = 1_000_000
@@ -72,7 +72,7 @@ def resolve_cache_root(explicit=None):
 _MISSING_CACHE_MSG = (
     "cache root %(dir)r is not present (or not a writable directory) on this "
     "node.\n"
-    "  image-sampler2 writes frames to the shared %(default)s cache so a consumer "
+    "  media-sampler3 writes frames to the shared %(default)s cache so a consumer "
     "plugin can\n"
     "  read them. That directory is provided by the 'wes-local-cache-manager' WES "
     "component\n"
@@ -83,7 +83,7 @@ _MISSING_CACHE_MSG = (
     "  the plugin was started without the volume mount.\n"
     "  Frames written to a nonexistent/ephemeral path are INVISIBLE to any "
     "consumer, so\n"
-    "  image-sampler2 refuses to run rather than silently produce unreadable "
+    "  media-sampler3 refuses to run rather than silently produce unreadable "
     "data.\n"
     "  Fix: deploy wes-local-cache-manager and mount its host dir at %(default)s "
     "(see the\n"

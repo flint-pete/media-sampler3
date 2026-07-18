@@ -1,7 +1,7 @@
-# image-sampler2 — Implementation Plan
+# media-sampler3 — Implementation Plan
 
-Staged, verify-as-you-go build plan for image-sampler2. Companion to the design
-doc `docs/imagesampler.flint.analysis.txt` (section refs like "2.6" point there).
+Staged, verify-as-you-go build plan for media-sampler3. Companion to the design
+doc `docs/mediasampler.flint.analysis.txt` (section refs like "2.6" point there).
 
 ## Principles
 
@@ -213,7 +213,7 @@ loop is wrong, and eviction only means something inside the loop.
   `--heartbeat-secs` configurable (3.2).
 - Payload: total image count + total bytes in the cache (per cache-name/stream);
   optional written/evicted-since-last, last capture status. Namespaced topic
-  (e.g. `env.imagesampler.cache.count` / `.bytes`), distinct from `plugin.*`.
+  (e.g. `env.mediasampler.cache.count` / `.bytes`), distinct from `plugin.*`.
 - Fires even when captures are skipped/failed (the "running but silent" case).
 - Stats are ~free (the 2.6 ring scan already computes count+bytes each capture).
 

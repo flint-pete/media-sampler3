@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- metadata module (Stage 2): capture-time stamping, the v2
+# media-sampler3 -- metadata module (Stage 2): capture-time stamping, the v2
 # filename scheme, and EXIF/UserComment embedding.
 #
 # Design refs: 2.9 (node-clock two timestamps), 2.10 (v2 name), 2.11 (EXIF field
@@ -38,7 +38,7 @@ import json
 
 import piexif
 
-SCHEMA_VERSION = "sage-img-1"
+SCHEMA_VERSION = "sage-media-1"
 V2_MARKER = "v2"
 
 # UserComment requires an 8-byte character-code prefix (Exif spec). ASCII here.
@@ -186,7 +186,7 @@ def build_exif_bytes(fields, *, preserved_make=None):
     cap_date, cap_subsec = _ns_to_exif_datetime(fields["capture_timestamp_ns"])
     make = preserved_make if (fields["acquisition_path"] == "native-raw"
                               and preserved_make) else "Sage/Waggle"
-    human = (f"Sage image-sampler2 {V2_MARKER}; vsn={fields['vsn']}; "
+    human = (f"Sage media-sampler3 {V2_MARKER}; vsn={fields['vsn']}; "
              f"camera={fields['camera']}; job={fields['job']}")
 
     zeroth = {

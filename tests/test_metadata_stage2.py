@@ -1,4 +1,4 @@
-# Stage 2 tests for image-sampler2 metadata (metadata.py).
+# Stage 2 tests for media-sampler3 metadata (metadata.py).
 #
 # PURE tests: no camera/network. Verify v2 filename format, capture-ts handling,
 # EXIF/UserComment round-trip, ImageUniqueID = SHA256(original frame), GPS abs+ref
@@ -26,7 +26,7 @@ FOREIGN_COM = b"#:M1IMG:PRD=MOBOTIX DAT=2026-07-03 TIM=21:00:08.323"
 
 COMMON = dict(
     vsn="H00F", node_id="00004cbb4701d16c", job="hummingbird",
-    task="image-sampler2", plugin="registry.example.org/pete/image-sampler2:0.1.0",
+    task="media-sampler3", plugin="registry.example.org/pete/media-sampler3:0.1.0",
     camera="top", capture_ts_ns=1783112408323875000, upload_ts_ns=None,
     lat=41.7180, lon=-87.9827, acquisition_path="native-raw")
 

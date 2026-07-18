@@ -1,7 +1,7 @@
-# image-sampler2
+# media-sampler3
 
-`image-sampler2` samples still images from a camera stream. It is an enhanced fork
-of the Sage/Waggle `imagesampler`, redesigned around a **producer/consumer** model:
+`media-sampler3` samples still images from a camera stream. It is an enhanced fork
+of the Sage/Waggle `mediasampler`, redesigned around a **producer/consumer** model:
 the sampler is a cheap, CPU-only **producer** that either uploads a single frame or
 maintains a bounded local **ring cache** that other plugins (inference, triggered
 uploaders) consume on their own schedule.
@@ -14,13 +14,13 @@ to show the visual context in which an inference was made.
 > naming + self-describing EXIF/JSON embed (Stage 2), and the one-shot upload path
 > to Beehive with fleet-portable node identity (Stage 3). The `--continuous` ring
 > cache and the heartbeat land in later stages. Full design:
-> `docs/imagesampler.flint.analysis.txt`.
+> `docs/mediasampler.flint.analysis.txt`.
 
 ---
 
 ## Modes (exactly one is required)
 
-`image-sampler2` runs in **one** of two mutually-exclusive modes. You must pass
+`media-sampler3` runs in **one** of two mutually-exclusive modes. You must pass
 exactly one; passing both, or neither, is a fail-fast error.
 
 | Mode | What it does |
@@ -93,7 +93,7 @@ with no per-node configuration. The flags below OVERRIDE the manifest.
 - **`--node-manifest PATH`** — path to the node manifest JSON (default env
   `WAGGLE_NODE_MANIFEST` or `/etc/waggle/node-manifest-v2.json`). For testing / off-node use.
 - **`--job NAME`** — job name for provenance. Default env `WAGGLE_JOB_NAME` or `sage`.
-- **`--task NAME`** — task name. Default env `WAGGLE_TASK_NAME` or `image-sampler2`.
+- **`--task NAME`** — task name. Default env `WAGGLE_TASK_NAME` or `media-sampler3`.
 - **`--plugin-version REF`** — plugin image `ref:version` recorded in EXIF/meta.
 
 ### Ring cache (continuous only)

@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- continuous-mode cache heartbeat (Stage 5, design §3.2).
+# media-sampler3 -- continuous-mode cache heartbeat (Stage 5, design §3.2).
 #
 # The heartbeat is the SOLE liveness signal for --continuous mode (local-only, so
 # there is no upload record to imply "alive"). This module is PURE: it owns the

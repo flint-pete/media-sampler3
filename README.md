@@ -1,7 +1,7 @@
-# image-sampler2
+# media-sampler3
 
-An enhanced fork of the Sage/Waggle **imagesampler** plugin
-(`waggle-sensor/plugin-imagesampler`, portal: `yonghokim/imagesampler`).
+An enhanced fork of the Sage/Waggle **mediasampler** plugin
+(`waggle-sensor/plugin-mediasampler`, portal: `yonghokim/mediasampler`).
 
 ## Status
 
@@ -13,7 +13,7 @@ confirmed), `--continuous` ring cache (S4), cache heartbeat/liveness (S5),
 `--from-cache` uploader (S6), and self-exit bounds `--max-count`/`--max-runtime`
 for GPU time-sharing (S3.3). 0.5.1 also modernized the container
 (`python:3.12-slim`, slimmed deps). Full design:
-`docs/imagesampler.flint.analysis.txt`.
+`docs/mediasampler.flint.analysis.txt`.
 
 The producer/consumer loop uses the shared `/local-cache` node cache provided by
 the `wes-local-cache-manager` WES component; if that mount is absent the plugin
@@ -34,7 +34,7 @@ real node identity/geotags await the pywaggle/WES runtime calls. See
 
 ## Provenance of the baseline
 
-- Upstream: https://github.com/waggle-sensor/plugin-imagesampler (branch `main`)
+- Upstream: https://github.com/waggle-sensor/plugin-mediasampler (branch `main`)
 - Upstream version at copy time: **0.3.8** (see `sage.yaml`)
 - All 12 upstream files copied faithfully (text files sha256-verified against
   upstream; binary `ecr-meta/*.jpg` byte-sizes verified).
@@ -42,7 +42,7 @@ real node identity/geotags await the pywaggle/WES runtime calls. See
 
 ## What's added on top of the baseline
 
-- `docs/imagesampler.flint.analysis.txt` — full code study of the upstream
+- `docs/mediasampler.flint.analysis.txt` — full code study of the upstream
   plugin: camera source, sample frequency, when/how images are saved,
   shortcomings, upgrade options, the pywaggle `{timestamp}-{filename}` naming
   mechanism, upload metadata (what pywaggle vs the server adds), the

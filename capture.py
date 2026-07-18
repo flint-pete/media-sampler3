@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- shared capture+embed body (Stage 4b).
+# media-sampler3 -- shared capture+embed body (Stage 4b).
 #
 # One code path produces a fully-formed, EXIF-embedded v2 JPEG written atomically
 # to a .tmp, used by BOTH:
@@ -19,7 +19,7 @@ import time
 import acquire
 import metadata
 
-logger = logging.getLogger("image-sampler2.capture")
+logger = logging.getLogger("media-sampler3.capture")
 
 
 class CaptureError(Exception):

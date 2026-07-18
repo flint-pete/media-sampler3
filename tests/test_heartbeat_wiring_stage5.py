@@ -1,6 +1,6 @@
 # Stage 5c tests: heartbeat WIRED into _continuous_to_cache. Fake plugin captures
 # publishes; fake clock drives both grids; fake camera (tiny jpeg). Verifies the
-# env.imagesampler.cache.* topics, meta, delta payloads, fires-when-captures-fail,
+# env.mediasampler.cache.* topics, meta, delta payloads, fires-when-captures-fail,
 # fail-soft publish, and the --heartbeat-secs CLI validation.
 
 import io
@@ -83,8 +83,8 @@ def test_heartbeat_publishes_cache_topics(tmp_path, monkeypatch):
     app._continuous_to_cache(_args(tmp_path), max_ticks=3, plugin=pl,
                              monotonic=clk.monotonic_ns, sleep=clk.sleep)
 
-    counts = _byname(pl, "env.imagesampler.cache.count")
-    bytez = _byname(pl, "env.imagesampler.cache.bytes")
+    counts = _byname(pl, "env.mediasampler.cache.count")
+    bytez = _byname(pl, "env.mediasampler.cache.bytes")
     assert len(counts) >= 1 and len(bytez) >= 1
     # Heartbeat fires BEFORE the capture on a shared grid edge, so the last beat
     # reflects the ring state at its edge (before that edge's capture). Counts are
@@ -110,9 +110,9 @@ def test_heartbeat_extras_written_evicted_status(tmp_path, monkeypatch):
     pl = FakePlugin()
     app._continuous_to_cache(_args(tmp_path), max_ticks=4, plugin=pl,
                              monotonic=clk.monotonic_ns, sleep=clk.sleep)
-    assert _byname(pl, "env.imagesampler.cache.written")
-    assert _byname(pl, "env.imagesampler.cache.evicted")
-    stat = _byname(pl, "env.imagesampler.cache.last_status")
+    assert _byname(pl, "env.mediasampler.cache.written")
+    assert _byname(pl, "env.mediasampler.cache.evicted")
+    stat = _byname(pl, "env.mediasampler.cache.last_status")
     assert stat[-1]["value"] in ("ok", "skip", "fail", "none")
 
 
@@ -127,10 +127,10 @@ def test_heartbeat_fires_even_when_all_captures_fail(tmp_path, monkeypatch):
     pl = FakePlugin()
     app._continuous_to_cache(_args(tmp_path), max_ticks=3, plugin=pl,
                              monotonic=clk.monotonic_ns, sleep=clk.sleep)
-    counts = _byname(pl, "env.imagesampler.cache.count")
+    counts = _byname(pl, "env.mediasampler.cache.count")
     assert len(counts) >= 1                 # liveness emitted despite dead camera
     assert counts[-1]["value"] == 0         # empty ring
-    stat = _byname(pl, "env.imagesampler.cache.last_status")
+    stat = _byname(pl, "env.mediasampler.cache.last_status")
     assert stat[-1]["value"] == "skip"      # last capture was a skip
 
 

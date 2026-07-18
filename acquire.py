@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- acquisition module (Stage 1).
+# media-sampler3 -- acquisition module (Stage 1).
 #
 # Stage 1 scope (design 2.3 primary path): fetch a camera's NATIVE still endpoint
 # and save the RAW JPEG BYTES UNTOUCHED (no decode, no re-encode), via an atomic
@@ -24,7 +24,7 @@ import time
 import urllib.parse
 import urllib.request
 
-logger = logging.getLogger("image-sampler2.acquire")
+logger = logging.getLogger("media-sampler3.acquire")
 
 # JPEG magic: starts with SOI (FF D8), ends with EOI (FF D9).
 JPEG_SOI = b"\xff\xd8"
@@ -96,7 +96,7 @@ def fetch_raw_still(url, timeout_s):
     if timeout_s is None or timeout_s <= 0:
         raise ValueError("timeout_s must be a positive number")
     logger.info("fetching still: %s (timeout %.1fs)", _redact(url), timeout_s)
-    req = urllib.request.Request(url, headers={"User-Agent": "image-sampler2"})
+    req = urllib.request.Request(url, headers={"User-Agent": "media-sampler3"})
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             status = getattr(resp, "status", resp.getcode())

@@ -1,6 +1,6 @@
 RELEASE?=0.0.0
 PLATFORM?=linux/amd64,linux/arm64
-IMAGE=image-sampler
+IMAGE=media-sampler
 PY?=.venv-test/bin/python
 
 all: image

@@ -1,4 +1,4 @@
-# image-sampler2 example jobs — the periodic-snapshot pattern
+# media-sampler3 example jobs — the periodic-snapshot pattern
 
 These two jobs implement the recommended way to get **periodic cloud snapshots**
 from a camera on a Sage node, using the producer/consumer split (design §2.1/§2.8).

@@ -3,7 +3,7 @@
 #  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
 # ANL:waggle-license
 #
-# image-sampler2 -- node identity resolution.
+# media-sampler3 -- node identity resolution.
 #
 # ============================================================================
 # Runtime identity is now LIVE via the WES wes-nodeinfo-injection change.

@@ -68,7 +68,7 @@ def build_exif_bytes(vsn, camera, capture_ts_ns, upload_ts_ns, uid_sha256,
     """Build our Option-C hybrid EXIF: standard tags + full JSON UserComment."""
     object_name = f"{capture_ts_ns}-v2-{vsn}-{camera}.jpg"
     blob = {
-        "schema": "sage-img-1", "vsn": vsn, "camera": camera,
+        "schema": "sage-media-1", "vsn": vsn, "camera": camera,
         "capture_ts_ns": capture_ts_ns, "upload_ts_ns": upload_ts_ns,
         "uid_sha256": uid_sha256, "object_name": object_name,
         "lat": lat, "lon": lon, "acq": "native-raw", "plugin": plugin_ver,
@@ -86,7 +86,7 @@ def build_exif_bytes(vsn, camera, capture_ts_ns, upload_ts_ns, uid_sha256,
         piexif.ImageIFD.Make: "Sage/Waggle",
         piexif.ImageIFD.Model: vsn,
         piexif.ImageIFD.Software: plugin_ver,
-        piexif.ImageIFD.ImageDescription: f"Sage image-sampler2 v2; vsn={vsn}; camera={camera}",
+        piexif.ImageIFD.ImageDescription: f"Sage media-sampler3 v2; vsn={vsn}; camera={camera}",
     }
     exif_ifd = {
         piexif.ExifIFD.DateTimeOriginal: "2026:07:03 21:00:08",
@@ -116,7 +116,7 @@ def main():
         vsn="H00F", camera="top", capture_ts_ns=1783112408323875000,
         upload_ts_ns=1783112409489787702,
         uid_sha256="9f3a" + "0" * 60, lat=41.7180, lon=-87.9827,
-        plugin_ver="registry.sagecontinuum.org/pete/image-sampler2:0.1.0")
+        plugin_ver="registry.sagecontinuum.org/pete/media-sampler3:0.1.0")
     print(f"\n[build] exif block {len(exif_bytes)} bytes; UserComment JSON {len(user_comment)} chars")
 
     # THE KEY CALL: insert into the JPEG bytes (in-memory), no Pillow, no re-encode.

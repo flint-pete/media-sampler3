@@ -1,18 +1,18 @@
-name: "image-sampler2"
-description: "Enhanced image sampler: capture-time naming, self-describing EXIF/JSON provenance, dual upload+local-cache, fleet-portable node identity."
-version: "0.5.1"
+name: "media-sampler3"
+description: "Versatile media sampler: capture-time naming, self-describing EXIF/JSON provenance, dual upload+local-cache, fleet-portable node identity. Captures JPEG frames AND audio clips into the shared /local-cache (v2 cache-frame contract)."
+version: "0.1.0"
 namespace: "beckman"
 authors: "Pete Beckman <pete.beckman@northwestern.edu>"
 collaborators: "Waggle Team <https://wa8.gl>"
 funding:
 license: "The license agreed by Argonne National Laboratory"
 keywords: "image, sampling, camera, periodic sampling, trigger-based sampling, exif, provenance"
-homepage: "https://github.com/flint-pete/image-sampler2/blob/main/ecr-meta/ecr-science-description.md"
+homepage: "https://github.com/flint-pete/media-sampler3/blob/main/ecr-meta/ecr-science-description.md"
 source:
   architectures:
     - "linux/arm64"
     - "linux/amd64"
-  url: "https://github.com/flint-pete/image-sampler2.git"
+  url: "https://github.com/flint-pete/media-sampler3.git"
   branch: "main"
 # NOTE on credentials: camera credentials are read from the environment
 # (CAMERA_USER / CAMERA_PASSWORD) ONLY -- never as args -- to keep them out of

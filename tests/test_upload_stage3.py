@@ -56,7 +56,7 @@ class FakePlugin:
 
 COMMON = dict(
     capture_timeout=10, vsn="H00F", node_id="00004CBB4701D16C", job="hummingbird",
-    task="image-sampler2", plugin_version="registry.example/is2:0.1.0",
+    task="media-sampler3", plugin_version="registry.example/is2:0.1.0",
     camera="top", lat=41.7179852752395, lon=-87.98271513806043)
 
 

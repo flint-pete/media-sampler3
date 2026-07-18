@@ -4,7 +4,7 @@
 # Cover: root auto-detect, cache-name validation, stream_dir create/writable,
 # scan ordering + unknown-file handling, eviction planning for every cap combo,
 # the E3 guard, evict-before-write ordering, atomic publish, and fail-soft
-# eviction. Section refs point at docs/imagesampler.flint.analysis.txt 2.6.
+# eviction. Section refs point at docs/mediasampler.flint.analysis.txt 2.6.
 
 import os
 import sys

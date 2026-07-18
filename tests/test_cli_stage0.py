@@ -1,10 +1,10 @@
-# Stage 0 tests for image-sampler2 CLI contract + fail-fast validation.
+# Stage 0 tests for media-sampler3 CLI contract + fail-fast validation.
 #
 # These are PURE tests: no camera, no network, no pywaggle. They exercise the
 # real argparse parser (build_parser) and the pure validator (validate_args),
 # asserting that every bad flag combination is rejected with a clear message and
 # every good combination is accepted. Section refs (e.g. 2.6) point at
-# docs/imagesampler.flint.analysis.txt.
+# docs/mediasampler.flint.analysis.txt.
 #
 # Run:  python3 -m pytest tests/ -q      (or: python3 -m pytest tests/test_cli_stage0.py -v)
 

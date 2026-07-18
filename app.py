@@ -6,8 +6,8 @@
 #           http://www.wa8.gl
 # ANL:waggle-license
 #
-# image-sampler2 -- enhanced fork of the Sage/Waggle imagesampler.
-# See docs/imagesampler.flint.analysis.txt for the full design (section refs
+# media-sampler3 -- enhanced fork of the Sage/Waggle mediasampler.
+# See docs/mediasampler.flint.analysis.txt for the full design (section refs
 # below, e.g. "2.2", point at that document).
 #
 # STAGE 0 (this file): CLI contract + fail-fast validation only. It parses and
@@ -34,7 +34,7 @@ logging.basicConfig(
     format='%(asctime)s %(message)s',
     datefmt='%Y/%m/%d %H:%M:%S')
 
-logger = logging.getLogger("image-sampler2")
+logger = logging.getLogger("media-sampler3")
 
 
 # Exit codes: fail-FAST on bad config/CLI is a clean, distinct nonzero code so a
@@ -43,12 +43,12 @@ EXIT_OK = 0
 EXIT_CONFIG_ERROR = 2
 EXIT_CAPTURE_ERROR = 3
 
-# Stage 5 heartbeat topics (design §3.2, resolved: keep env.imagesampler.cache.*).
-HB_TOPIC_COUNT = "env.imagesampler.cache.count"
-HB_TOPIC_BYTES = "env.imagesampler.cache.bytes"
-HB_TOPIC_WRITTEN = "env.imagesampler.cache.written"
-HB_TOPIC_EVICTED = "env.imagesampler.cache.evicted"
-HB_TOPIC_STATUS = "env.imagesampler.cache.last_status"
+# Stage 5 heartbeat topics (design §3.2, resolved: keep env.mediasampler.cache.*).
+HB_TOPIC_COUNT = "env.mediasampler.cache.count"
+HB_TOPIC_BYTES = "env.mediasampler.cache.bytes"
+HB_TOPIC_WRITTEN = "env.mediasampler.cache.written"
+HB_TOPIC_EVICTED = "env.mediasampler.cache.evicted"
+HB_TOPIC_STATUS = "env.mediasampler.cache.last_status"
 
 
 class ConfigError(Exception):
@@ -72,7 +72,7 @@ def _is_valid_cache_name(name):
 
 
 def build_parser():
-    """Build the argparse parser for image-sampler2.
+    """Build the argparse parser for media-sampler3.
 
     Returned as a function so tests can construct the parser in isolation.
 
@@ -81,7 +81,7 @@ def build_parser():
       --continuous SECONDS  run forever on a fixed period of SECONDS.
     """
     parser = argparse.ArgumentParser(
-        prog="image-sampler2",
+        prog="media-sampler3",
         description="Sample still images from a camera stream: upload once "
                     "(--one-shot) or maintain a local ring cache (--continuous).")
 
@@ -153,7 +153,7 @@ def build_parser():
         help='CONTINUOUS ONLY. Cache-heartbeat cadence in seconds (default 60), '
              'INDEPENDENT of --continuous SECONDS. The heartbeat is the sole '
              'liveness signal in continuous mode (local-only never uploads); it '
-             'publishes env.imagesampler.cache.* stats and fires even when '
+             'publishes env.mediasampler.cache.* stats and fires even when '
              'captures fail. Must be a positive integer.')
     parser.add_argument(
         '--max-count', dest='max_count', metavar='N',
@@ -211,11 +211,11 @@ def build_parser():
         help='Job name for provenance. Default env WAGGLE_JOB_NAME or "sage".')
     parser.add_argument(
         '--task', dest='task', metavar='NAME',
-        action='store', default=os.environ.get('WAGGLE_TASK_NAME', 'image-sampler2'),
+        action='store', default=os.environ.get('WAGGLE_TASK_NAME', 'media-sampler3'),
         type=str, help='Task name for provenance. Default env WAGGLE_TASK_NAME.')
     parser.add_argument(
         '--plugin-version', dest='plugin_version', metavar='REF',
-        action='store', default=os.environ.get('IS2_PLUGIN_VERSION', 'image-sampler2:dev'),
+        action='store', default=os.environ.get('IS2_PLUGIN_VERSION', 'media-sampler3:dev'),
         type=str, help='Plugin image ref:version for EXIF Software/plugin field.')
     parser.add_argument(
         '--lat', dest='lat', metavar='DEG', action='store',
@@ -729,7 +729,7 @@ def _safe_job_name(job):
     """Coerce a job label into a filesystem-safe cache-name; fallback if empty."""
     import re
     candidate = re.sub(r"[^A-Za-z0-9._-]", "-", str(job or "")).strip("-")
-    return candidate or "imagesampler2"
+    return candidate or "mediasampler3"
 
 
 def _one_shot_from_cache(args):
@@ -775,7 +775,7 @@ def main(argv=None):
         logger.error("config error: %s", e)
         return EXIT_CONFIG_ERROR
 
-    logger.info("image-sampler2 config OK: %s", summarize(args))
+    logger.info("media-sampler3 config OK: %s", summarize(args))
 
     # Dispatch. One-shot-from-camera (Stage 3) and continuous-to-cache (Stage 4)
     # are wired; --from-cache is Stage 6.

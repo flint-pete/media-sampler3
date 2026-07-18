@@ -29,13 +29,13 @@ scheduled; its upload record + `plugin.duration.*` already signal liveness. Stag
   used by those images. Optional cheap extras: images written / evicted since the
   last heartbeat; last capture status (ok/skip/fail); cache-name + camera so
   multi-stream nodes disaggregate.
-- TOPICS: `env.imagesampler.cache.count` and `env.imagesampler.cache.bytes`
+- TOPICS: `env.mediasampler.cache.count` and `env.mediasampler.cache.bytes`
   (final names confirmable at impl). Keep distinct from `plugin.*` reserved names.
 - `plugin.duration.*` does NOT apply in continuous mode.
 
 pywaggle confirms (docs): `plugin.publish(name, value, timestamp=ns, meta={...})`
 accepts arbitrary dotted names, ns timestamps, and a string-valued meta dict —
-so `env.imagesampler.cache.*` with `meta={cache_name, camera, ...}` is valid.
+so `env.mediasampler.cache.*` with `meta={cache_name, camera, ...}` is valid.
 
 ## 3. Design
 
@@ -78,14 +78,14 @@ we would emit a heartbeat only every 300s, violating "~once a minute." Options:
 ### 3.2 What gets published
 
 Per heartbeat, publish (timestamp = now ns):
-  - `env.imagesampler.cache.count`  = ring image count (int)
-  - `env.imagesampler.cache.bytes`  = ring total bytes (int)
+  - `env.mediasampler.cache.count`  = ring image count (int)
+  - `env.mediasampler.cache.bytes`  = ring total bytes (int)
   with `meta = {cache_name, camera, vsn}` (all strings) so multi-stream/-config
   nodes disaggregate. Optional extras (lean: INCLUDE, they're cheap and aid
   debugging):
-  - `env.imagesampler.cache.written`  = images written since last heartbeat
-  - `env.imagesampler.cache.evicted`  = images evicted since last heartbeat
-  - `env.imagesampler.cache.last_status` = "ok" | "skip" | "fail" (last capture)
+  - `env.mediasampler.cache.written`  = images written since last heartbeat
+  - `env.mediasampler.cache.evicted`  = images evicted since last heartbeat
+  - `env.mediasampler.cache.last_status` = "ok" | "skip" | "fail" (last capture)
   Counters reset to 0 after each heartbeat (delta semantics).
 
 The ring count/bytes come from `cache.scan_ring(sdir)` (authoritative, already
@@ -130,7 +130,7 @@ Pure/unit (no camera, no rabbitmq; fake clock + fake plugin capturing publishes)
     reset each heartbeat.
   - publish exception is swallowed (fail-soft), loop continues.
   - CLI: `--heartbeat-secs` continuous-only, positive-int fail-fast.
-On-node (H00F, brief): confirm `env.imagesampler.cache.*` records land in the
+On-node (H00F, brief): confirm `env.mediasampler.cache.*` records land in the
 data plane (query-browser / data API) while `--continuous` runs; confirm they
 keep coming when the camera is unplugged (the key liveness case).
 
@@ -163,5 +163,5 @@ loop so §3.3 drops in cleanly. OPEN Q for Pete.
    (delta semantics, reset each heartbeat) alongside count+bytes.
 3. Scope (§6): **RESOLVED → heartbeat-ONLY Stage 5.** §3.3 self-exit deferred to
    its own later stage; loop structured so it drops in cleanly.
-4. Topic names: **RESOLVED → keep `env.imagesampler.cache.{count,bytes,...}`** per
+4. Topic names: **RESOLVED → keep `env.mediasampler.cache.{count,bytes,...}`** per
    the locked spec (no fork disambiguation).

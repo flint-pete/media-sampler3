@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-# image-sampler2 — PRODUCER (continuous local ring cache)
+# media-sampler3 — PRODUCER (continuous local ring cache)
 #
 # Fills a bounded, per-stream local ring cache with capture-time-named, EXIF-
 # embedded frames. LOCAL-ONLY: this job NEVER uploads (design §2.8). Pair it with
@@ -29,11 +29,11 @@
 #   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/producer-continuous.yaml
 #   sesctl ... submit -j <returned-id>
 # ──────────────────────────────────────────────────────────────
-name: image-sampler2-producer
+name: media-sampler3-producer
 plugins:
-  - name: image-sampler2-producer
+  - name: media-sampler3-producer
     pluginSpec:
-      image: registry.sagecontinuum.org/beckman/image-sampler2:0.5.1
+      image: registry.sagecontinuum.org/beckman/media-sampler3:0.1.0
       args:
         - "--continuous"
         - "60"                       # capture every 60s onto the ring
@@ -64,6 +64,6 @@ nodes:
   H00F: true
 scienceRules:
   # Keep the producer running (it loops forever; restart if it exits).
-  - "schedule(image-sampler2-producer): cronjob('image-sampler2-producer', '@reboot')"
+  - "schedule(media-sampler3-producer): cronjob('media-sampler3-producer', '@reboot')"
 successcriteria:
   - WallClock('30day')

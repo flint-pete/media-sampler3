@@ -206,6 +206,6 @@ def test_continuous_missing_creds_fail_fast(tmp_path, monkeypatch):
 
 def test_safe_job_name_coerces_and_falls_back():
     assert app._safe_job_name("my job/x") == "my-job-x"
-    assert app._safe_job_name("") == "imagesampler2"
-    assert app._safe_job_name(None) == "imagesampler2"
+    assert app._safe_job_name("") == "mediasampler3"
+    assert app._safe_job_name(None) == "mediasampler3"
     assert app._safe_job_name("ok-name_1.2") == "ok-name_1.2"
