@@ -1,0 +1,54 @@
+# ──────────────────────────────────────────────────────────────
+# image-sampler2 — UPLOADER (one-shot, from-cache, scheduler cron */30)
+#
+# The "consumer/uploader" half of the producer/consumer split (§2.8). On each cron
+# tick it takes the NEWEST image already sitting in the local ring cache (filled by
+# the PRODUCER job, producer-continuous.yaml) and uploads it to Beehive via the
+# existing one-shot upload path — WITHOUT touching the camera, writing, or evicting.
+#
+# WHY COMPOSITION (producer + uploader) instead of one do-everything job:
+#   • --continuous is strictly local-only (never uploads); --one-shot always
+#     uploads and never caches. --from-cache is the bridge (§2.8). This keeps the
+#     sampler a pure producer and makes the cache shareable by many consumers.
+#   • The uploader hits the cache, not the camera — so raising the upload cadence
+#     never increases camera load, and the producer's capture rate is independent
+#     of the upload rate.
+#
+# CAPTURE-TIME PRESERVED: the cached file already carries its
+# <capture_ts_ns>-v2-<vsn>-<camera>.jpg name; the upload keeps that original
+# capture timestamp end to end (record timestamp = capture ts, §2.10). No camera
+# credentials are needed here (this job never contacts the camera).
+#
+# --from-cache <dir> points at the STREAM dir the producer writes to:
+#   <cache-root>/<cache-name>/<camera>/  ==  /local-cache/hummingcam/top
+#
+# TUNING THE RATE: change the cron expression in scienceRules.
+#   '*/30 * * * *' = every 30 min  |  '*/10 * * * *' = every 10 min
+#
+# EMPTY CACHE = fail-fast (exit 2): if the cache dir has no v2 images (e.g. the
+# producer isn't running), the uploader exits nonzero so the misconfig surfaces
+# rather than silently doing nothing.
+#
+# Submit (with a write-scoped token):
+#   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/uploader-from-cache.yaml
+#   sesctl ... submit -j <returned-id>
+# ──────────────────────────────────────────────────────────────
+name: image-sampler2-uploader
+plugins:
+  - name: image-sampler2-uploader
+    pluginSpec:
+      image: registry.sagecontinuum.org/beckman/image-sampler2:0.5.1
+      args:
+        - "--one-shot"
+        - "--stream"
+        - "top"
+        - "--from-cache"
+        - "/local-cache/hummingcam/top"   # the producer's STREAM dir
+      selector:
+        zone: core
+nodes:
+  H00F: true
+scienceRules:
+  - "schedule(image-sampler2-uploader): cronjob('image-sampler2-uploader', '*/30 * * * *')"
+successcriteria:
+  - WallClock('30day')

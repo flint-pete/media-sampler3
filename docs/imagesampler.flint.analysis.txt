@@ -1,0 +1,1074 @@
+═══════════════════════════════════════════════
+IMAGE-SAMPLER2 — DESIGN & UPSTREAM ANALYSIS
+═══════════════════════════════════════════════
+
+Purpose of this document
+  A complete, reconciled record of (1) what the upstream Sage/Waggle imagesampler
+  actually does and where it falls short, and (2) the LOCKED design for its
+  enhanced fork "image-sampler2", plus (3) requirements carried forward,
+  (4) genuinely open questions, and (5) deferred enhancements.
+
+  Part 1 studies the upstream code and its defects; each defect is tagged with
+  where the design addresses it. Parts 2-5 are the current design — every item is
+  status-tagged (see legend) so what is settled, what is still open, and what is
+  deferred are unambiguous.
+
+Upstream under study
+  App:        waggle-sensor/plugin-imagesampler (portal: yonghokim/imagesampler)
+  Author:     Yongho Kim (ANL)
+  Version:    0.3.8
+  Source:     https://github.com/waggle-sensor/plugin-imagesampler (branch main)
+  Deps:       pywaggle[vision]==0.56.*, croniter
+  Base image: waggle/plugin-base:1.1.1-base (amd64 + arm64)
+  Analyzed:   2026-07-03 on Flint; design decisions 2026-07-03..07-04
+
+STATUS LEGEND (used throughout)
+  [LOCKED]      design decision made and fixed; do not re-litigate without cause
+  [VERIFIED]    empirically confirmed against live node/fleet data or source
+  [REQUIREMENT] carried-forward obligation the implementation must satisfy
+  [OPEN]        genuinely unresolved; needs a decision or a check before build
+  [DEFERRED]    intentionally postponed to a post-robust-testing backlog (Part 5)
+
+CLI RENAME NOTE (2026-07-06): the continuous-cache flag was renamed
+--cache-dir -> --cache-root, and its meaning changed from "full cache dir" to a
+BASE root under which the per-instance subtree <cache-root>/<cache-name>/<camera>/
+is created (see 2.6 for the authoritative definition + auto-detected default
+/local-cache-else-/tmp). Any older "--cache-dir" text remaining in this document
+refers to --cache-root and the 2.6 layout; 2.6 is authoritative.
+
+Node/context facts used below
+  Target node: H00F (Thor, single GPU, hummingcam). Geo lat 41.7180, lon -87.9827.
+  Node hw id 00004cbb4701d16c / host ...agx-thor.
+
+
+═══════════════════════════════════════════════
+PART 1 — UPSTREAM CODE STUDY (imagesampler 0.3.8, as-is)
+═══════════════════════════════════════════════
+Descriptive + diagnostic only. This is the evidence base the design builds on.
+"How image-sampler2 changes it" lives in Part 2; each defect here is tagged with
+where it is addressed.
+
+───────────────────────────────
+1.1  WHAT IT IS
+───────────────────────────────
+The canonical "collect training data / show inference context" plugin: grab a
+still frame from a camera stream and either publish it to the Sage cloud or write
+it to local disk. ~110 lines of app.py + a small standalone upload.py helper.
+
+───────────────────────────────
+1.2  CAMERA SOURCE
+───────────────────────────────
+- --stream is a named stream (bottom_camera, top_camera) resolved via the node
+  camera config, or a raw URL (rtsp://IP:PORT/..., RTSP/HTTP).
+- Acquisition = waggle.data.vision.Camera(stream) -> cam.snapshot(). One frame,
+  context-managed (opens/closes the camera each capture).
+- Multiple streams: repeat --stream; each gets its own multiprocessing.Process.
+  Optional --name list labels them (must match count/order).
+- Only metadata published: meta={"camera": stream_name} on the upload.
+  [Addressed by Part 2 acquisition mandate + EXIF field set.]
+
+───────────────────────────────
+1.3  FREQUENCY OF SAMPLES (upstream --cronjob)  [SUPERSEDED by 2.2]
+───────────────────────────────
+Two modes, decided by --cronjob:
+- One-shot (--cronjob ""): capture once, exit 0. Cadence external (SES relaunch).
+- Self-scheduled (--cronjob "0 * * * *"): run forever, croniter sleeps to next
+  cron tick, capture, loop. Cadence baked into the container.
+In cronjob mode Plugin() is opened ONCE and held; in one-shot it opens, captures
+once, closes.
+  [image-sampler2 REPLACES --cronjob with --one-shot / --continuous <sec>; see
+  2.2. The name --cronjob conflated "how scheduled" with "what the process does."]
+
+───────────────────────────────
+1.4  WHEN / HOW IMAGES ARE SAVED (upstream)
+───────────────────────────────
+capture() branches on --out-dir:
+- Cloud publish (out_dir empty): writes a FIXED local filename sample.jpg, then
+  plugin.upload_file("sample.jpg", meta={"camera": name}). Every stream/process
+  overwrites the same sample.jpg in CWD before uploading. [Defect: shared-file
+  race, 1.6. FIXED in design, see 2.5/2.6/2.7.]
+- Local save (out_dir set): does NOT upload. Builds a UTC-partitioned tree
+  OUTDIR/<stream>/YYYY/MM/DD/HH/YYYY-MM-DDTHH:MM:SS±zzzz.jpg (URL slashes become
+  subdirs). One-or-the-other: cannot upload AND keep a local copy in one run.
+  [Reframed by the mode split + --from-cache, see 2.2/2.8.]
+
+───────────────────────────────
+1.5  HOW UPLOADED IMAGES ARE NAMED (pywaggle mechanism)  [VERIFIED]
+───────────────────────────────
+Object-store objects look like:  1783105211072377356-sample.jpg
+The name is generated by PYWAGGLE, not imagesampler. imagesampler contributes
+only the base filename "sample.jpg":
+
+    sample_file_name = "sample.jpg"
+    sample.save(sample_file_name)
+    plugin.upload_file(sample_file_name, meta={"camera": stream_name})
+
+pywaggle (Plugin.upload_file) does the naming:
+    def upload_file(self, path, meta={}, timestamp=None, keep=False):
+        timestamp = timestamp or get_timestamp()   # <-- the number
+        meta["filename"] = Path(path).name          # "sample.jpg"
+    stored object name = f"{timestamp}-{src.name}"  ->  1783105211072377356-sample.jpg
+
+The number:
+- Nanosecond epoch (integer, time.time_ns()-style), UTC.
+- SAME value used as the upload message's timestamp field AND the sidecar meta.
+  So the filename prefix IS the record timestamp.
+- Uniqueness comes only from the ns prefix — NOT from anything imagesampler does.
+
+CRUCIAL — where the timestamp comes from:
+- get_timestamp() is evaluated INSIDE upload_file(), i.e. at UPLOAD time.
+- imagesampler does NOT pass timestamp=sample.timestamp, though the snapshot
+  carries its own capture timestamp and upload_file() accepts timestamp=.
+- => the prefix/record timestamp reflects the UPLOAD instant, not capture. Close
+  for a fast capture->upload, but drifts if upload is delayed (the cross-country
+  object-store lag we hit elsewhere).
+  [image-sampler2 stamps at CAPTURE time from the node clock; see 2.9/2.10.]
+
+Two pywaggle naming schemes (don't confuse):
+- OBJECT-STORE object name = f"{timestamp}-{filename}"  (what you see in the store)
+- ON-NODE staging DIR (uploader.py) = f"{timestamp}-{sha1sum}" containing "data"
+  + "meta" (the local checksum-based staging layout, NOT the object name).
+
+───────────────────────────────
+1.6  UPSTREAM SHORTCOMINGS (and where each is handled)
+───────────────────────────────
+Structural / correctness:
+- No trigger-based sampling despite the "Periodical/Trigger-based" tagline; code
+  is purely time-driven. [DECIDED-against as a sampler feature: image-sampler2
+  keeps the sampler a pure PRODUCER; triggering is a CONSUMER concern in the
+  producer/consumer architecture. See 2.8/2.12.]
+- Upload vs local mutually exclusive; can't buffer locally AND push to cloud.
+  [Reframed by the mode split + composition, 2.2/2.8; not a single-run "both".]
+- Shared sample.jpg race: in cloud mode with multiple --stream workers, every
+  process writes the same sample.jpg in one CWD before uploading; concurrent
+  captures can clobber between save() and upload_file() -> a stream can upload
+  another stream's frame. No per-stream name, no tempfile, no lock.
+  [FIXED in design three ways: per-stream v2 filenames (2.10), per-stream cache
+  subdirs (2.6), atomic temp->fsync->os.replace (2.6).]
+- Uploaded name/timestamp reflect UPLOAD time, not CAPTURE time: imagesampler
+  discards the free sample.timestamp and lets pywaggle stamp at upload.
+  [FIXED: capture-time stamping from the node clock, 2.9/2.10.]
+
+Robustness / ops [these become REQUIREMENTS, Part 3]:
+- No error handling around capture. Camera()/snapshot() can throw (offline, RTSP
+  timeout, auth). In cronjob mode one transient error kills the forever-loop and
+  sampling stops until pod restart. No try/except, retry, or backoff.
+  [ADOPTED-as-requirement 3.1: fail-soft loop.]
+- No heartbeat / liveness. Publishes no plugin.duration.* and no periodic "alive"
+  record; a dark camera is indistinguishable from a crash. [ADOPTED 3.2.]
+- Cron drift / no catch-up; a long capture silently skips a tick with no handling.
+  [FIXED by the fixed-period monotonic-grid loop, 2.2.]
+- No image-format / quality / resize options. [ADOPTED-with-caveat 3.4 — must
+  reconcile with the never-re-encode mandate; see OPEN 4.5.]
+- No max-count / max-runtime clean self-exit (awkward for windowed GPU scheduling;
+  less critical here as the sampler is CPU-only). [ADOPTED 3.3.]
+- sample.jpg written to CWD, not a temp dir. [FIXED by atomic temp writes 2.6.]
+
+Documentation / packaging:
+- Stale README dev note ("As of Dec 2020..."); leftover upload.py helper; no tests.
+  [ADOPTED 3.5 (deps/docs) + 3.6 (tests).]
+
+───────────────────────────────
+1.7  UPLOAD METADATA — pywaggle vs server  [VERIFIED]
+───────────────────────────────
+Traced through pywaggle main (plugin.py, rabbitmq.py). When imagesampler calls
+plugin.upload_file("sample.jpg", meta={"camera": name}), pywaggle emits ONE
+message name="upload" carrying:
+  - name      = "upload"  (RESERVED; plugins cannot publish this name themselves)
+  - value     = "{timestamp}-sample.jpg"
+  - timestamp = timestamp or get_timestamp()  <-- THE ONLY TIME FIELD. Shared by
+                the object-name prefix, the message timestamp, and the sidecar
+                meta. pywaggle has exactly ONE timestamp slot; it does NOT carry
+                two times natively.
+  - meta      = your dict + ONE auto key meta["filename"]=Path(path).name.
+                So the full published meta is {"camera":..., "filename":"sample.jpg"}.
+
+Hard constraints pywaggle enforces on every publish/upload:
+  - valid_meta(): meta MUST be a FLAT dict of str->str. A second timestamp must be
+    stringified: meta["capture_timestamp"]=str(sample.timestamp).
+  - MIN_TIMESTAMP_NS: __publish rejects any timestamp < 2000-01-01 (ns). Any
+    hand-built timestamp must be NANOSECONDS since epoch. (seconds/ns tripwire.)
+
+What pywaggle does NOT add (injected SERVER-SIDE): the only node/job context on
+the wire is the AMQP property app_id (env WAGGLE_APP_ID). vsn/node, host, job,
+task, plugin (registry...:version), zone, lat/lon are all injected server-side
+(validator/data-service), keyed off app_id + the k3s scheduler, AFTER the message
+leaves the node. The plugin sends only name/value/timestamp/meta{camera,filename}
++ the app_id property; the cloud enriches the rest.
+
+CONSEQUENCE FOR BATCH-AND-HOLD (capture now, upload later): the single message
+timestamp is the ONLY time leaving the plugin. Capture at T0, hold, upload at T1:
+status quo stamps the record T1 and loses T0. pywaggle offers no second slot; the
+two-timestamp scheme must be implemented BY US via meta. The gap grows from ms to
+minutes once capture/upload are decoupled (batch pull, hold-for-analysis, or the
+cross-country lag). [image-sampler2 does exactly this; see 2.9.]
+
+───────────────────────────────
+1.8  RTSP sample.timestamp SEMANTICS  [VERIFIED]
+───────────────────────────────
+Traced through pywaggle data/vision.py + timestamp.py (main).
+FINDING: sample.timestamp is the HOST WALL-CLOCK time of frame GRAB (node clock),
+NOT camera exposure time. For RTSP it is the grab time recorded by a background
+daemon thread and may be up to ~10 ms stale vs the returned frame. It is NEVER the
+RTP/sensor/camera-side timestamp.
+Mechanism: Camera.__enter__ enables the daemon for non-file:// URLs; the daemon
+loop does capture.grab(); self.timestamp=get_timestamp() (host time_ns()) every
+~10 ms; snapshot() returns the last grabbed frame with that stored timestamp.
+Consequences:
+  1. Host-clock GRAB time, not sensor EXPOSURE time (OpenCV RTSP FPS is garbage,
+     so pywaggle deliberately stamps with host time).
+  2. Up to ~10 ms stale for RTSP.
+  3. UNMEASURED camera->node pipeline delay (encode+network+decoder buffer, tens
+     to hundreds of ms) happens BEFORE the grab; sample.timestamp marks node-grab.
+Other sources: USB/non-daemon uses get_timestamp() right after a sync grab (no
+10 ms staleness); file:// video synthesizes timestamps; ImageFolder (test dir)
+uses file st_mtime_ns.
+IMPLICATION: "capture time" = node frame-grab time, honestly labeled. It is the
+earliest well-defined instant the node can attest to and is strictly better than
+upload time for batch-and-hold (pinned at grab, before any hold/upload delay). It
+does NOT eliminate the camera->node pipeline delay; true sub-second scientific
+alignment would require the RTP/ONVIF timestamp, which pywaggle does not surface.
+BATCH PERFORMANCE NOTE: Camera.snapshot() wraps each call in `with self.capture:`,
+so every snapshot spins up + tears down the RTSP daemon. A batch design should
+hold ONE Camera/_Capture open across the batch (stream()/repeated grabs) rather
+than per-frame snapshot().
+
+───────────────────────────────
+1.9  DOWNLOADED JPG + LINKING BACK TO THE EVENT LOG  [VERIFIED]
+───────────────────────────────
+(a) From the JPEG BYTES alone — essentially nothing. imagesampler saves via
+    ImageSample.save() -> cv2.imwrite(): NO EXIF/XMP/comment/timestamp/camera/GPS.
+    Only image dimensions + a generic JFIF header are recoverable.
+(b) From the FILENAME — the ns prefix = the record timestamp (Section 1.5); the
+    only provenance the bare object carries.
+(c) From the full OBJECT-STORE URL — a lot: the path encodes job, plugin+version,
+    node id, timestamp, filename, e.g.
+      .../<JOB>/<PLUGIN-VERSION>/<NODE_ID>/<TIMESTAMP>-<FILENAME>
+    But a bare file on disk with no path keeps only the timestamp.
+
+The real metadata lives in the name="upload" event record (server-enriched):
+  timestamp, name=upload, value=<full URL>, meta{filename, vsn, node, host, job,
+  task, plugin(registry...:VERSION), zone, + plugin-supplied keys}. Observed
+  plugin keys across the fleet: camera, common_name, confidence, detections,
+  top_class, top_species. (Our capture_timestamp/upload_timestamp go here too.)
+
+Filename -> event-log recipe (verified): split on first '-', convert ns prefix to
+UTC, query name="upload" in a +-2 s window (add vsn if known), match the record
+whose value ENDSWITH your object name. Breaks only if the file was renamed.
+
+UNIQUENESS PROBLEM WITH ns-AS-KEY [VERIFIED against 24h fleet: 20,375 recs,
+58 nodes]:
+  - SAME-node ns collisions: 760 (a node emits multiple uploads at the identical
+    ns). Causes: (i) one cycle uploads multiple artifacts sharing one timestamp=
+    (e.g. mobotix-scan: 6 objects at one ns); (ii) COARSE CLOCKS — ~2,800 records
+    had >=1 trailing zero, one had 10 (whole-second); (iii) source-file-time
+    stamping (file-forager).
+  - CROSS-node ns collisions: 695 ns values shared across nodes.
+  Object store survives on FULL-PATH uniqueness; the problem is purely a
+  downloaded BARE file that lost its path.
+  Key tests: (vsn, ns) -> 760 collisions (NOT unique); (vsn, ns, filename) -> 0;
+  (vsn, full-object-name) -> 0. But imagesampler's CONSTANT "sample.jpg" filename
+  means multi-stream/batch/same-second captures could still collide on
+  (vsn, ns, filename) — the linking view of the same sample.jpg race.
+  Even (vsn, ns, filename) is unique in PRACTICE, not by CONSTRUCTION; a
+  construction-guaranteed key needs a per-capture sequence/uuid/content-sha.
+  [image-sampler2: per-stream camera filename kills the constant-name collision;
+  SHA256 of bytes is the construction-guaranteed key. See 2.9/2.10/2.11.]
+
+───────────────────────────────
+1.10  COARSE-CLOCK FINDING (upstream ecosystem issue, not ours)  [VERIFIED]
+───────────────────────────────
+During 1.9 analysis, one node (W096) showed whole-second timestamps (9-10 trailing
+zeros). Diagnosed NOT a clock fault: on the same node/window, imagesampler,
+waggle-wxt536, waggle-aqt530, cloud-motion, audio-sampler all emit full-ns stamps
+(842 records). The whole-second stamps come from ONE plugin — file-forager
+(bhupendraraut/file-forager) — which uploads pre-existing files stamped by the
+SOURCE FILE's second-resolution time and reuses that second across multiple
+artifacts per cycle.
+CLASSIFICATION: a plugin-level provenance choice (source-file second), outside
+image-sampler2 and pywaggle core. Two concerns to raise upstream: (A) uniqueness
+— coarse/duplicated stamps break any (vsn, ns) linking; recommend a per-artifact
+token; (B) semantic clarity — a source-file second is easily mistaken for
+capture/upload time; argues for the explicit two-timestamp convention.
+FOR US: our LINKING design must not depend on ns uniqueness — and it does not
+(2.10/2.11). ACTION ITEM (separate, non-blocking): raise (A)/(B) with the
+file-forager author / Sage data-conventions owners.
+
+
+═══════════════════════════════════════════════
+PART 2 — image-sampler2 DESIGN [LOCKED]
+═══════════════════════════════════════════════
+Every subsection is a decision made 2026-07-03..07-04 with rationale. These
+supersede the corresponding upstream behavior in Part 1.
+
+───────────────────────────────
+2.1  ARCHITECTURE OVERVIEW — PRODUCER / CONSUMER  [LOCKED]
+───────────────────────────────
+The single most important decision: DECOUPLE acquisition from inference/upload.
+  - image-sampler2 is a cheap, CPU-only PRODUCER. In --continuous mode it fills a
+    local, bounded ring cache on the node. It NEVER uploads and NEVER does
+    inference or triggering.
+  - Separate CONSUMER plugins (YOLO, BioClip, BirdNet; audio/event triggers; a
+    periodic uploader) wake on their own schedule, READ the shared cache, act, and
+    upload only what matters.
+Why this is the design (the real prize):
+  - Fixes the single-GPU contention trap on Thor (only one always-on GPU plugin
+    can run). Instead of a GPU model plugin HOLDING the GPU to sample the camera
+    itself, a consumer loads the model ONCE, BATCH-infers N cached images, uploads
+    the interesting ones, unloads, and FREES the GPU.
+  - Amortization (BioClip, model load ~10.4 s, inference ~1 s/img):
+      load->infer->exit per image: 10.4 + 1 = 11.4 s/img, GPU held throughout,
+        ~5 img/min ceiling.
+      batched N=10: 10.4 + 10*1 = 20.4 s for 10 = ~2.04 s/img amortized, GPU held
+        20.4 s then FREED (~5.6x throughput; GPU idle/shareable the rest).
+  - Keeping the sampler a PURE PRODUCER (no upload, no trigger) is what makes the
+    whole system composable and lets multiple consumers share one cheap producer.
+This decision drives 2.2 (modes), 2.8 (continuous is local-only), and
+2.12 (shared cross-plugin cache).
+
+MODE-AND-FLOW OVERVIEW (the whole decision tree in one place)  [LOCKED]
+  image-sampler2 runs in exactly ONE of two required, mutually-exclusive modes.
+  There are three total invocations; each has a single, unambiguous data flow:
+
+  (1) --one-shot                      "get a sample NOW" (from the camera)
+        FLOW: acquire ONE frame from the camera -> embed our EXIF (2.11) and name
+        it <capture_ts_ns>-v2-<vsn>-<camera>.jpg (the same capture-time v2 name the
+        cache uses, 2.10) -> QUEUE it for cloud upload (pywaggle stages it into the
+        host-backed uploads mount, fed timestamp=capture_ts so the object name
+        matches) -> exit 0.
+        DOES NOT write to --cache-dir (that flag is REJECTED in one-shot, 2.6).
+        The staged local file is EPHEMERAL: it lives only in the pod's upload
+        staging area; the async WES upload-agent completes the upload even after
+        the pod exits (staging is host-backed, 2.12). Nothing persists in a cache.
+        Cadence is EXTERNAL (the SES scheduler relaunches the pod). Best for
+        periodic cloud snapshots and "grab one now."
+
+  (2) --one-shot --from-cache <dir>   upload the NEWEST already-cached image
+        FLOW: read the NEWEST image already in <dir> (put there by a --continuous
+        producer, already carrying its capture-ts v2 name) -> upload it via the
+        SAME one-shot upload path, preserving that original capture-ts name end to
+        end (2.10) -> exit 0. Does NOT touch the camera; does NOT write a new
+        image; does NOT evict. v1 selects NEWEST only; time-window selectors
+        (--closest-before/after-timestamp) are a DEFERRED enhancement (5.2). This
+        is the composable "periodic uploader" half of the producer/consumer
+        pattern (2.8).
+
+  (3) --continuous <SECONDS> [--cache-root <root>] [--cache-name <name>] [caps]
+        FLOW: on a fixed-period grid (2.2), acquire a frame -> embed EXIF -> build
+        the FULL name <capture_ts_ns>-v2-<vsn>-<camera>.jpg ITSELF and atomically
+        write that exact filename into the per-stream ring under <dir> (2.6, 2.10)
+        -> evict oldest as needed -> loop forever. NEVER uploads (local-only, 2.8).
+        This is the PRODUCER that fills the shared cache for consumers (2.12). The
+        on-disk name is identical in structure to what one-shot would upload.
+
+  In short: --one-shot always UPLOADS and never caches; --continuous always CACHES
+  and never uploads. --from-cache is the bridge that lets a one-shot uploader
+  publish what a continuous producer cached. There is no mode that both uploads
+  AND writes a persistent local copy in a single run — that need is met by
+  COMPOSITION (run a producer + a one-shot --from-cache uploader), not by one
+  do-everything invocation (2.8).
+
+───────────────────────────────
+2.2  MODES: --one-shot / --continuous <SECONDS>  [LOCKED]
+───────────────────────────────
+Replace the poorly-named --cronjob with two DESCRIPTIVE, MUTUALLY-EXCLUSIVE,
+REQUIRED mode flags (argparse add_mutually_exclusive_group(required=True)):
+  --one-shot              capture once, exit 0. External cadence via the SES
+                          scheduler relaunching the pod. (was --cronjob "")
+  --continuous <SECONDS>  run forever, capturing on a FIXED PERIOD of <SECONDS>.
+                          The interval is the flag's REQUIRED positive-integer
+                          argument. (was --cronjob "<cron expr>")
+Rules (fail-fast): passing BOTH or NEITHER is a parse error; interval <= 0 is a
+parse error; no silent default mode. croniter dependency is dropped. Plugin()
+lifecycle unchanged: --continuous opens Plugin() once for the process life;
+--one-shot opens, captures once, closes.
+
+--one-shot IS UPLOAD-ONLY; IT NEVER WRITES A PERSISTENT LOCAL COPY  [LOCKED]:
+  In --one-shot mode the captured frame is staged for cloud upload and the pod
+  exits; nothing is added to any cache. --cache-dir / --cache-max-* are REJECTED
+  in one-shot (fail-fast, 2.6), so one-shot cannot populate a ring. The local file
+  is EPHEMERAL upload staging only: pywaggle upload_file() places it into the
+  host-backed uploads mount (/run/waggle/uploads, 2.12) and the async WES
+  upload-agent finishes the transfer even after the one-shot pod exits — so the
+  upload is not lost by the immediate exit, and no image lingers in a cache dir.
+  (--one-shot --from-cache is the only way one-shot reads a persisted image, and
+  it READS the cache, never WRITES it — 2.8.)
+
+FIXED-PERIOD SCHEDULING for --continuous (safe + simple, ~12 lines):
+  Requirement: fire on a fixed grid t0, t0+N, t0+2N ...; never drift. On OVERRUN
+  (slow/busy camera, large image, capture timeout) SKIP missed tick(s) — no
+  backlog.
+  ALGORITHM — monotonic grid with skip:
+    N_ns  = interval_s * 1_000_000_000
+    start = time.monotonic_ns()          # MONOTONIC clock for scheduling
+    tick  = 0
+    while True:
+        target = start + tick * N_ns
+        now = time.monotonic_ns()
+        if target > now:
+            time.sleep((target - now) / 1e9)
+        do_one_capture_with_timeout()          # BOUNDED; warns+skips on error
+        now = time.monotonic_ns()
+        tick = (now - start) // N_ns + 1       # next future slot; drops missed
+  Why safe: tick is RECOMPUTED from elapsed time each cycle, so an overrun of any
+  number of periods lands on the next future slot in one O(1) jump — no
+  accumulator, no backlog, no busy-loop. MONOTONIC clock => immune to NTP/DST/
+  manual clock-set (image is STAMPED with wall-clock time separately, 2.9).
+  Rejected: `capture(); sleep(N)` (drifts); `next += N` accumulator (goes negative
+  on overrun -> busy-loop/backlog).
+  BOUNDED CAPTURE is required (the other half of "no backlog"): hard timeout on
+  the grab; on timeout/error WARN and SKIP the sample, NO inline retry (a retry
+  eats the next tick). Fail-SOFT: one bad frame must not kill the loop. Config
+  rule (fail-FAST): capture timeout SHOULD be < interval; if timeout >= interval,
+  WARN at startup (overruns then expected; still safe via skip, just lossier).
+
+───────────────────────────────
+2.3  ACQUISITION + METADATA MANDATE (prefer raw native bytes)  [LOCKED]
+───────────────────────────────
+Camera-authored JPEG metadata exists or not depending on (a) vendor and (b)
+acquisition path (Part 1 evidence: Mobotix embeds a rich block; Hanwha + Reolink
+author none; OpenCV/libav re-encode STRIPS everything). Therefore:
+  1. PRIMARY PATH — raw native still. Fetch the camera's native still endpoint
+     and save the RAW JPEG BYTES UNTOUCHED (no decode, no re-encode). Preserves
+     whatever the camera authored (e.g. Mobotix M1IMG).
+  2. INJECT, DON'T REBUILD. Add our Sage fields (2.11) by INSERTING an EXIF/COM
+     segment into the existing JPEG byte stream, leaving camera segments intact.
+     Never round-trip a pixel decode.
+  3. FALLBACK PATH — OpenCV/RTSP only when no native still exists (stream-only
+     source). Accept pixels-only + re-encode; still add our fields; LABEL the
+     image acquisition_path="opencv-reencoded".
+  4. PRESERVE-IF-PRESENT is model-specific and unpredictable (2 of 3 tested
+     cameras author nothing). ONE defensive code path serves the whole fleet and
+     any future EXIF-bearing camera with no code change — vendor-agnostic, not
+     per-camera special-casing.
+  5. Capture time is ALWAYS the node clock (2.9), even for Mobotix; the camera's
+     own time is preserved in the embedded block for reference only.
+CONSEQUENCE: the native-still HTTP fetch (raw bytes) is a FIRST-CLASS acquisition
+source; pywaggle Camera()/OpenCV is the fallback.
+CAMERA SOURCE SELECTION NOTE: when choosing HOW to acquire from a camera, prefer
+the method that yields the best metadata in the resulting JPG (native raw over
+re-encode).
+
+───────────────────────────────
+2.4  VENDOR INTERFACES + LIVE EVIDENCE  [VERIFIED]
+───────────────────────────────
+Acquisition endpoints (differ per vendor; do not generalize):
+  - REOLINK (RLC-811A, H00F cam): cgi-bin/api.cgi?cmd=Snap (or RTSP).
+  - HANWHA/WISENET: SUNAPI /stw-cgi/video.cgi?msubmenu=snapshot&action=view; full
+    ONVIF. TESTED (W08D bottom, 2560x1920): native snapshot is JFIF-only, NO EXIF.
+  - MOBOTIX (M16, ToDo #3): /record/current.jpg, /cgi-bin/image.jpg?..,
+    /control/event.jpg?sequence=head, /cgi-bin/faststream.jpg (MxPEG). Native
+    JPEGs embed a Mobotix fingerprint (below).
+Three live marker-scanned tests:
+  SOURCE / PLUGIN                       CAMERA METADATA IN BYTES
+  Reolink H00F, cmd=Snap                NONE (bare JPEG; camera authors none)
+  Mobotix W08D, mobotix-scan (libav)    STRIPPED (only a "Lavc58.54.100" tag)
+  Mobotix W08D, imagesampler-mobotix    FULL M1IMG fingerprint + MXF block (raw)
+  Hanwha  W08D, imagesampler-bottom     NONE (JFIF-only; NOT a re-encode strip —
+                                        same raw-preserving plugin kept Mobotix's)
+KEY OBSERVATION: the two Mobotix rows are the SAME camera; the ONLY difference is
+acquisition path. Re-encode destroyed metadata; raw-bytes preserved it. That is
+the whole design lesson (2.3).
+What Mobotix embeds (decoded): PRD=MOBOTIX, FRM, DAT=2026-07-03, TIM=21:00:08.323,
+TZN=GMT, TIT=1783112408.323 (epoch capture), CTY=DUAL, ICC=MxPEG, XTO/YTO, QLT,
+per-sensor WIN/SNR/ZOM/ACT/BRT telemetry + a 301-byte MXF block. Richer than EXIF
+and includes a TRUE camera-side capture time (kept for reference only; the node
+clock remains authoritative, 2.9).
+WHY OpenCV WAS USED: pywaggle Camera()->OpenCV->libav was chosen for
+vendor-neutrality (one path for any RTSP/HTTP URL); metadata loss is an unintended
+side effect. That is the gap image-sampler2 closes.
+
+───────────────────────────────
+2.5  SAVE MODEL + THE sample.jpg RACE (fixed)  [LOCKED]
+───────────────────────────────
+Upstream's shared sample.jpg race (1.4/1.6/1.9) is DESIGNED OUT three ways:
+  1. Per-stream v2 filenames <ts>-v2-<vsn>-<camera>.jpg (2.10) — no shared
+     sample.jpg to clobber.
+  2. Per-stream cache subdirs <cache-dir>/<camera>/ (2.6) — each stream writes
+     its own directory.
+  3. Atomic temp->fsync->os.replace on write (2.6) — no torn file and no
+     read-before-upload race on a shared name.
+So a stream can never upload/emit another stream's frame. Upload-vs-local
+exclusivity is replaced by the mode split (2.2) + --from-cache (2.8).
+
+───────────────────────────────
+2.6  CONTINUOUS-MODE LOCAL CACHE (RING BUFFER)  [LOCKED]
+───────────────────────────────
+--continuous writes each frame into a local ring buffer, bounded so storage never
+grows without bound. The cache location is a ROOT + a per-instance subtree.
+
+FLAG: --cache-root  (renamed from --cache-dir 2026-07-06; supersedes --out-dir)
+  - The BASE directory under which this instance's cache subtree lives.
+  - DEFAULT (auto-detected, first that applies):
+        $IS2_CACHE_ROOT env  ->  /local-cache (if it exists)  ->  /tmp
+    Rationale: today no shared cache mount exists, so the default lands in /tmp
+    (pod-local, ephemeral, works for the PRODUCER + all Stage-4 verification). The
+    Sage CI team is expected to provide a node-persistent, cross-consumer-readable
+    /local-cache mount (a sibling to /uploads); when present the plugin uses it
+    with NO flag or code change. An explicit --cache-root always wins.
+  - Created with parents if missing (mkdir -p); must be writable -> else fail-fast.
+  - INTERIM /tmp CAVEAT: /tmp is pod-local and wiped on pod restart, and is NOT
+    visible to other consumer pods. So under /tmp the PRODUCER is fully functional
+    but the cross-pod CONSUMER story does not work yet -- that waits for CI's
+    /local-cache + the 4.2 cross-user-read design. All cache machinery is written
+    ASSUMING a real persistent /local-cache; /tmp is only a stopgap for producing
+    and verifying images now.
+CACHE SUBTREE LAYOUT (under the root):
+        <cache-root>/<cache-name>/<camera>/<capture_ts_ns>-v2-<vsn>-<camera>.jpg
+  - <cache-name> defaults to the JOB id (from WAGGLE_APP_ID / job env; falls back
+    to a safe default if unset). This mirrors the future /local-cache/<job>/...
+    convention so consumers have a predictable place to look.
+  - --cache-name OVERRIDES the <cache-name> segment (stable, filesystem-safe id;
+    letters/digits/dot/dash/underscore, no path separators). Use it so two configs
+    on the same camera don't collide and so a consumer can be pointed at a known
+    name. OPTIONAL (defaults to job id).
+  - <camera> is the per-stream segment (2.6 per-stream ring); each stream's ring is
+    independent, caps applied per stream.
+FLAG: --continuous SECONDS
+  - Interval is INTEGER SECONDS ONLY (positive int; fractional not supported --
+    keeps scheduling simple). Fail-fast on <= 0.
+BOUNDING (two independent caps, evict-on-EITHER):
+  --cache-max-count N   max number of images in the ring
+  --cache-max-mb    M   max total megabytes (decimal MB, 10^6) of ring images
+  - Both may be set; eviction triggers when EITHER would be exceeded.
+  - At least ONE required with --continuous (else unbounded) -> fail-fast if none.
+  - "size" = total bytes of the MANAGED image set (files matching the v2 name
+    pattern) in the per-stream ring; .tmp and unknown files are not counted.
+ONE-SHOT REJECTS CACHE FLAGS: --cache-root / --cache-name / --cache-max-* with
+  --one-shot -> fail-fast (meaningless; one-shot is upload-only, 2.8).
+PER-STREAM RINGS: each --stream (own process) writes its own subdir
+<cache-root>/<cache-name>/<camera>/ — an INDEPENDENT ring, caps applied PER
+STREAM. No shared state, no locks, race-free. ENFORCED (a1, 2026-07-06): ONE
+plugin instance = ONE camera stream; --continuous with >1 --stream is a fail-fast
+config error (run a separate plugin/job per camera). This removes intra-process
+concurrency entirely: one scheduler, one ring, one fail-soft path. (--one-shot is
+unchanged; it uses stream[0].)
+"OLDEST" ORDERING: evict oldest by the CAPTURE-TS PREFIX in the v2 filename
+(authoritative, no stat); fallback mtime for non-matching files; unknown files
+left untouched and uncounted.
+STATELESS MANAGEMENT: no authoritative in-memory ring state; each capture SCANS
+the per-stream subdir, computes, decides. Crash/restart just re-scans. (An
+in-memory index may be added later only if profiling demands; rebuilt from disk,
+never trusted across a crash.)
+STARTUP ADOPTION: v2-matching files already present are adopted (counted, sized,
+evictable); non-matching files left alone and uncounted; NEVER wipe at startup.
+PER-CAPTURE ALGORITHM (EVICT BEFORE the file joins the ring):
+  1. Acquire image (bounded capture, 2.2) into a .tmp so new_bytes is known
+     (.tmp is NOT a ring member).
+  2. SCAN subdir -> current_count, current_bytes, oldest-first list.
+  3. E3 GUARD: if a size cap is set and new_bytes > max_mb even with an empty ring,
+     DROP THE NEW IMAGE with a loud WARNING, delete the .tmp, do not write (keep
+     the cache valid/bounded).
+  4. EVICT-LOOP: while (count+1 > max_count) OR (bytes+new_bytes > max_bytes),
+     delete the OLDEST ring file; update counters. (Deletes as many as needed.)
+  5. ATOMIC WRITE: fsync the .tmp, then os.replace(.tmp -> final v2 name). The
+     final file appears atomically and only NOW joins the ring. Because eviction
+     completed BEFORE the rename, the ring never transiently exceeds caps and no
+     torn .jpg exists under the final name.
+FAILURE HANDLING (fail-SOFT; a long-running process must not die on transient FS
+errors): eviction-delete failure -> WARN, continue, retry next cycle; disk full /
+write fail -> WARN, SKIP this sample, keep looping. Config errors remain
+fail-FAST at startup.
+INTERACTION with 2.2: scan+evict+write happen inside the bounded per-tick step;
+per-stream subdirs keep listings small so ring work does not cause overruns; if
+slow, the 2.2 skip logic keeps the schedule on its grid.
+
+───────────────────────────────
+2.7  EXIF/NAMING FOR CACHE FILES  [LOCKED]
+───────────────────────────────
+Cache images still receive our EXIF (2.11) so a file copied off the node is
+self-describing, and use the FULL v2 filename scheme WITH the capture-ts prefix —
+<capture_ts_ns>-v2-<vsn>-<camera>.jpg, written by the sampler itself at capture
+(2.10) — so the on-disk cache name is identical in structure to what --one-shot
+would upload, and ordering + per-stream identity are intact. Since --continuous is
+local-only (2.8), the event-log LINKING purpose (1.9) does not apply to cache
+files (no upload record to find); the EXIF is purely for self-description.
+capture_timestamp is the node clock
+(2.9); upload_timestamp is N/A for cache-only files (a CONSUMER that later
+uploads produces the upload record + upload_timestamp at that time).
+
+───────────────────────────────
+2.8  --continuous IS LOCAL-ONLY + --from-cache  [LOCKED]
+───────────────────────────────
+--continuous is STRICTLY LOCAL-ONLY, never uploads; the cache is its sole sink.
+Uploading is always a CONSUMER concern. This preserves the pure-producer role (2.1).
+PERIODIC-SNAPSHOT CASE (e.g. one cloud image every ~30 min) solved by COMPOSITION,
+not an upload flag:
+  (a) image-sampler2 --continuous <sec> --cache-dir ... --cache-name ...  (producer)
+  (b) image-sampler2 --one-shot --from-cache <dir>, scheduled by SES
+      cronjob('*/30 * * * *'): takes the NEWEST cached image and uploads it via the
+      EXISTING one-shot upload path (no new upload logic, no camera hit).
+Ship a ready-to-copy job PAIR so the simple case is turnkey.
+NEW SOURCE FLAG --from-cache (orthogonal to mode):
+  --one-shot                    : grab ONE frame from the camera and upload it,
+                                  then exit ("get a sample now" / periodic cloud
+                                  snapshot). Upload-only; writes no cache (2.2).
+  --one-shot --from-cache <dir> : take the NEWEST image already in the cache and
+                                  upload it; do NOT touch the camera, write, or
+                                  evict.
+  - v1 selection = NEWEST only (serves the snapshot case). Time-window selectors
+    (--closest-before/after-timestamp) are DEFERRED (5.2).
+  - --from-cache is one-shot-only: combining with --continuous is a fail-fast
+    error; empty/nonexistent cache dir is a fail-fast error.
+  - It is independently useful (re-upload, backfill, camera-free testing) and is
+    the SAME "read from cache -> act" pattern consumers use — a reference
+    implementation, not overhead.
+
+───────────────────────────────
+2.9  TIMESTAMP SOURCE (node clock, two times)  [LOCKED]
+───────────────────────────────
+The ONE authoritative time is the NODE's Linux clock (RTC, GPS-disciplined where
+available) — NEVER the camera's clock (a camera may be freshly flashed/power-
+cycled with a wrong clock; it must not key the images/metadata).
+Two times, BOTH from node time_ns():
+  - capture_timestamp = node time_ns() at grab   -> the FILENAME prefix (via
+    pywaggle upload_file(timestamp=capture_ts) on the upload path).
+  - upload_timestamp  = node time_ns() at send   -> stored in meta + EXIF.
+Camera-side time (e.g. Mobotix TIM/TZN/TIT) is preserved in the embedded block for
+reference only; never the key, never the record timestamp.
+Two-timestamp pattern honoring pywaggle constraints (1.7): record timestamp =
+capture time; meta["upload_timestamp"]=str(get_timestamp()) at the real send;
+optional meta["capture_timestamp"] redundancy; latency = upload_timestamp -
+timestamp. All meta values are STRINGS; all timestamps ns >= 2000-01-01.
+BACK-DATED-TIMESTAMP SAFETY [VERIFIED — see also 2.13]: switching the record
+timestamp to capture time back-dates records relative to ingest; the data-service
+tolerates this (confirmed).
+
+───────────────────────────────
+2.10  v2 FILENAME SCHEME  [LOCKED]
+───────────────────────────────
+THE FULL v2 NAME IS APPLIED AT CAPTURE TIME, IDENTICALLY IN BOTH PATHS.
+The complete name — including the capture-timestamp prefix — is a property of the
+image the moment it is captured, NOT something added only at upload. Both the
+cache path and the upload path produce the exact same name structure:
+
+  Full name = <node_capture_ts_ns>-v2-<vsn>-<camera>.jpg
+  Example   = 1783112408323875000-v2-H00F-top.jpg
+       node ns capture ─┘   │   │     └ camera / stream name
+                            │   └ vsn  (cross-node disambiguation; self-identifies)
+                            └ v2  (convention marker: prefix = CAPTURE time)
+
+  - CONTINUOUS / CACHE path (2.6): the sampler BUILDS THE FULL NAME ITSELF —
+    <capture_ts_ns>-v2-<vsn>-<camera>.jpg — and writes that exact filename into the
+    per-stream ring under --cache-dir (via the atomic temp->rename, 2.6). pywaggle
+    is NOT involved; the on-disk cache file already carries the capture-ts prefix.
+    This is what makes the ring's oldest-by-capture-ts eviction (2.6) and the
+    --from-cache capture-ts selection (2.8, 5.2) work directly off the filename.
+  - ONE-SHOT / UPLOAD path (2.2/2.8): the sampler owns the basename
+    v2-<vsn>-<camera>.jpg and passes timestamp=capture_ts to pywaggle
+    upload_file(). pywaggle's convention is to prepend "{timestamp}-" to the
+    basename, so it reproduces the IDENTICAL full name
+    <capture_ts_ns>-v2-<vsn>-<camera>.jpg in the object store. (Because we hand it
+    the CAPTURE timestamp, not letting it default to upload time, 2.9.)
+
+HOW THE CAPTURE-TS SWITCH WORKS (the whole change is ONE argument):
+  pywaggle does NOT own the timestamp — it only DEFAULTS it. Confirmed in the
+  current pywaggle source (Plugin.upload_file):
+      def upload_file(self, path, meta={}, timestamp=None, keep=False):
+          timestamp = timestamp or get_timestamp()   # <-- the fallback
+          ...
+          dst = f"{timestamp}-{src.name}"             # object-name prefix
+          self.__publish("upload", dst.name, meta, timestamp)  # record ts
+  The `timestamp or get_timestamp()` short-circuit is the hinge:
+    - Pass NOTHING (timestamp=None) and pywaggle falls back to get_timestamp() =
+      time.time_ns() evaluated AT UPLOAD TIME. That is what upstream imagesampler
+      does (1.5), which is why its prefix is upload time.
+    - Pass an EXPLICIT timestamp= and the `or` short-circuits — pywaggle uses OUR
+      value verbatim for BOTH the filename prefix AND the upload record timestamp.
+  So the switch is literally:
+      capture_ts = time.time_ns()          # at the shutter, node clock (2.9)
+      # ...acquire, embed EXIF, basename = v2-<vsn>-<camera>.jpg...
+      plugin.upload_file(path, meta=meta, timestamp=capture_ts)
+  We do NOT bypass or reimplement pywaggle's naming; we just stop letting it pick
+  the timestamp. CONSTRAINT (pywaggle __publish, 1.7): timestamp MUST be an int in
+  NANOSECONDS >= 2000-01-01 (MIN_TIMESTAMP_NS) or it raises — so capture_ts is
+  time.time_ns() (ns int), never seconds.
+  (The cache path has no pywaggle call at all: the sampler builds the full name
+  <capture_ts_ns>-v2-<vsn>-<camera>.jpg itself, above. Same prefix, same result.)
+
+So a file uploaded by one-shot and a file sitting in the cache follow the SAME
+naming structure and the SAME capture-time prefix. A --from-cache upload of a
+cached file therefore keeps that file's original capture-ts name end to end (the
+cached name already is the object name). The only mechanical difference is WHO
+writes the prefix: the sampler directly for the cache, pywaggle (fed the same
+capture timestamp) for a fresh one-shot upload — the RESULT is identical.
+
+Why each element (ties to 1.9 collisions):
+  - v2     : marks the machinery change (capture-time prefix, EXIF embed, raw-bytes
+             acquisition) so old (send-time) and new (capture-time) names are never
+             confused.
+  - vsn    : fixes CROSS-node same-ns collisions (695/24h); self-identifies node.
+  - camera : fixes SAME-node multi-stream/batch collisions (the old constant
+             sample.jpg clobber; 760/24h).
+  - SHA256 NOT in the filename: unique in practice via vsn+camera+ns; the
+    construction-guaranteed 1:1 key lives in EXIF ImageUniqueID (2.11).
+DANGERS OF THE CAPTURE-TIME PREFIX (all mitigated):
+  1. Record timestamp != ingest time -> RESOLVED (2.13: data-service tolerates
+     back-dated timestamps).
+  2. Time-window queries can MISS a just-uploaded, old-capture record -> the
+     watcher uses a fixed lookback window, not a max-ts cursor (2.13); size
+     lookback to worst-case lag if consumers stamp at capture time.
+  3. Send-time loss -> MITIGATED: upload_timestamp always in meta + EXIF (2.9).
+
+───────────────────────────────
+2.11  EXIF FIELD SET  [LOCKED]
+───────────────────────────────
+Goal: a downloaded bare file is self-describing AND carries a construction-
+guaranteed key to its exact event-log record.
+DESIGN: a HYBRID embed with SHA256 as the unique id.
+  - Standard EXIF tags where a real one fits (self-describing to any tool/human).
+  - PLUS a complete JSON blob in UserComment (lossless machine round-trip of ALL
+    fields, including those with no standard EXIF home).
+  - unique_id = SHA256 of the ORIGINAL captured frame (before injection), in both
+    UserComment JSON and ImageUniqueID; see 4.6 (a self-hash cannot live inside the
+    bytes it hashes). Also serves as the capture identity/integrity key.
+THE FIELD SET (13):
+  1 vsn; 2 node_id; 3 job; 4 task; 5 plugin+version; 6 camera/stream;
+  7 capture_timestamp_ns (node grab); 8 upload_timestamp_ns (node send);
+  9 unique_id (sha256 of bytes); 10 object_name (<ts>-v2-<vsn>-<camera>.jpg);
+  11 lat/lon; 12 acquisition_path ("native-raw"|"opencv-reencoded");
+  13 schema_version ("sage-img-1").
+EXIF MAPPING:
+  0th IFD: Make = preserved camera Make if native-raw else "Sage/Waggle";
+    Model=<vsn>; Software=<plugin>:<version>; DateTime=capture (sec, node clock);
+    ImageDescription = human line.
+  Exif SubIFD: DateTimeOriginal=capture "YYYY:MM:DD HH:MM:SS" (node clock);
+    SubSecTimeOriginal=fractional; OffsetTimeOriginal="+00:00";
+    ImageUniqueID=<sha256>; UserComment=<JSON blob of all 13 fields>.
+  GPS IFD: GPSLatitude/Ref, GPSLongitude/Ref; GPSDateStamp/TimeStamp (optional).
+NATIVE-RAW + INJECTION: when preserving camera bytes (2.3), INSERT our EXIF/
+UserComment into the existing JPEG WITHOUT re-encoding, leaving camera segments
+(e.g. Mobotix M1IMG) intact. unique_id = SHA256 of the ORIGINAL frame (before
+injection); see 4.6.
+EXIF-INJECTION LIBRARY: piexif (RESOLVED, see 4.4).
+
+───────────────────────────────
+2.11b  NODE IDENTITY SOURCING  [RESOLVED 2026-07-06, verified via full Beehive round-trip on H00F]
+───────────────────────────────
+Where do vsn / node_id / gps_lat / gps_lon (fields 1,2,11) come from on a REAL
+node, fleet-wide? INVESTIGATED four ways (pywaggle 0.56 source, pywaggle docs, a
+live `ses` plugin pod, and the existing yolo/bioclip plugins):
+  - There is NO supported way for a plugin to learn its own VSN or GPS at runtime.
+    pywaggle 0.56 has no gps/vsn/location/node API (source grep: zero hits); its
+    docs expose only publish/subscribe/upload_file.
+  - A live `ses` plugin pod has ONLY WAGGLE_PLUGIN_* + WAGGLE_SCOREBOARD env and
+    mounts ONLY /run/waggle/{uploads,data-config.json}. /etc/waggle/ is a node-HOST
+    path and is NOT mounted into pods, so node-manifest-v2.json is UNREADABLE from
+    inside a plugin container. (It is readable when you run the code directly on the
+    node host — dev/spikes only — which is why an earlier host-run test misled us.)
+  - The existing yolo/bioclip plugins do NOT self-identify at all: they upload_file()
+    and let Beehive attach node identity DOWNSTREAM via message routing.
+CONCLUSION: the plugin is node-agnostic by design; Beehive stamps vsn + node_id
+from routing. VERIFIED in the Beehive data API: an image-sampler2 upload whose
+FILENAME used the placeholder vsn "NODE" still came back with meta {"vsn":"H00F",
+"node":"00004cbb4701d16c"} — attribution is correct regardless of what the plugin
+knows.
+RESOLUTION (nodemeta.py), per-field precedence:
+  explicit flag  >  runtime lookup  >  node manifest / /etc/waggle files (host-only)
+  - Runtime lookup is a PLACEHOLDER today (grep "TODO(sage-ci)"): the Sage CI team
+    is adding runtime "GPS call" + "VSN call" APIs (expected within days of
+    2026-07-06). When they land, implement nodemeta._runtime_identity() and delete
+    the placeholder; NOTHING downstream changes (the identity dict shape is stable).
+  - If vsn is still unknown -> PLACEHOLDER_VSN ("NODE", env IS2_PLACEHOLDER_VSN),
+    flagged vsn_is_placeholder=True; a WARNING is logged. Identity is NEVER fatal.
+  - If lat/lon are unknown -> OMITTED from EXIF GPS. We NEVER fabricate coordinates
+    (fake geo would corrupt science data; absent is correct).
+UPLOAD CONTRACT (pywaggle uploader, VERIFIED from source + full round-trip):
+  upload_file(path, meta, timestamp) stages root/<timestamp>-<sha1sum>/{data,meta}
+  on-node, delivered to Beehive object store at storage.sagecontinuum.org.
+  timestamp = timestamp or get_timestamp(), so timestamp=capture_ts keys the object
+  by CAPTURE time (2.10) — CONFIRMED: the Beehive record's timestamp ==
+  capture_timestamp == the filename prefix. meta values MUST all be strings
+  (valid_meta); Beehive adds vsn/node/host/zone/job/task. We add
+  capture_timestamp/upload_timestamp/unique_id/camera/acquisition_path/
+  schema_version as string labels.
+
+───────────────────────────────
+2.12  SHARED CROSS-PLUGIN CACHE (consumer triggers)  [LOCKED, w/ open items]
+───────────────────────────────
+The continuous cache is a SHARED buffer other plugins read after the fact.
+Motivating cases: an audio plugin decides a lightning strike happened at T and
+uploads the cached frames from ~10 s before T; a remote wildfire alert makes a
+local agent pull this node's cached frame nearest the event instant. The sampler's
+obligation: make its cache DISCOVERABLE + READABLE by other plugins, uniquely per
+instance.
+REQUIREMENTS:
+  R-A cross-plugin visibility: a file the sampler pod writes must be readable by a
+      DIFFERENT plugin pod on the node (pods have separate container FS by default,
+      so the cache must sit on a host-backed shared mount).
+  R-B unique per instance, visible to all: two users on the SAME camera with
+      DIFFERENT options must not collide, yet both caches must be consumer-readable.
+DECISIONS:
+  - UNIQUENESS KEY = --cache-name (stable, user-supplied; NOT the SES job id which
+    changes per resubmit; NOT an opaque hash). Path:
+        <SHARED_ROOT>/<cache-name>/<camera>/ ...
+    --cache-name is REQUIRED with --continuous, filesystem-safe (validated;
+    fail-fast on illegal chars/separators).
+  - Consumers find caches by CONVENTION for now (SHARED_ROOT + known --cache-name +
+    <camera>); a runtime discovery/announcement mechanism is DEFERRED (5.1).
+RING <-> TRIGGER BEHAVIOR:
+  - SIZE THE CACHE >= LONGEST TRIGGER LOOKBACK. Triggers want pre-event frames;
+    the ring evicts oldest-first, so set --cache-max-count/-mb to hold at least
+    (max_trigger_lookback / sampling_interval) images, with margin. (Sizing rule,
+    not a mechanism.)
+  - CONCURRENT READ + EVICT IS POSIX-SAFE: an OPEN fd survives unlink (no torn read
+    from eviction); new files appear atomically (2.6); a consumer enumerating the
+    dir MUST tolerate ENOENT between listing and open (a file may be evicted
+    meanwhile — treat as "gone, skip") and copy/upload promptly.
+  - Eviction keeps the MOST RECENT window (exactly what lookback triggers want).
+  - The sampler does not coordinate with consumers (no locks); consumers are
+    read-only; only the sampler writes/evicts its own per-stream ring.
+SHARED_ROOT — ON-NODE FINDINGS [VERIFIED on H00F + edge-scheduler 0.28.0 source]:
+  - /media/plugin-data/ exists on the node, backed by the 937G NVMe root disk ->
+    host-backed, persists across pod restart AND node reboot.
+  - WES auto-mounts, into EVERY plugin pod, hostPath
+    /media/plugin-data/uploads/<JOB>/<NAME>/<TAG> -> /run/waggle/uploads (rw). The
+    uploads area is already structured per-plugin-instance. (Confirmed in the live
+    upload-agent mount + the scheduler source "Default Volume Mounts".)
+  - Cross-pod visibility (R-A) works because these are hostPath mounts: what one
+    pod writes on the host, another pod mounting the same path reads.
+  - WES also supports user volumes (uservolume-N) but the source warns they REQUIRE
+    a nodeSelector or the pod fails to schedule.
+  - Plugin env injected: WAGGLE_APP_ID (pod uid), HOST (node name),
+    WAGGLE_PLUGIN_HOST/PORT, mounted /run/waggle/data-config.json.
+  CACHE HOME (A vs B) is OPEN — see 4.1.
+OPEN items for this section: 4.1 (cache home + upload-agent scoping), 4.2
+(cross-user read permissions).
+
+───────────────────────────────
+2.13  BACK-DATED TIMESTAMPS + WATCHER AUDIT  [VERIFIED]
+───────────────────────────────
+Two checks cleared the capture-time prerequisite:
+CHECK 1 — data-service honors client-supplied (back-dated) timestamps: across
+18,873 fleet upload records in 24h, the API record timestamp EQUALS the supplied
+ns prefix 100% (gap < 1 ms). Genuinely back-dated file-forager records (~5.5 h
+behind source; oldest 23.7 h back) are stored and retrievable at their back-dated
+time. => capture-time record timestamps are safe at the data layer.
+CHECK 2 — slack-hummingbird watcher poll audit: it uses a FIXED 120 s relative
+lookback (safe pattern, not a max-ts cursor), so it won't permanently drop
+back-dated records. The image-sampler2 capture-time switch affects IMAGE-upload
+records (already tolerated by the watcher's 240 s deferred image queue), not the
+near-real-time DETECTION records the watcher polls. FOLLOW-UP only if the
+inference plugins later adopt capture-time stamping: widen the detection lookback
+to >= 300 s.
+
+
+═══════════════════════════════════════════════
+PART 3 — REQUIREMENTS CARRIED FORWARD
+═══════════════════════════════════════════════
+Still-valid upstream fixes, now REQUIREMENTS of image-sampler2 (not "ideas").
+
+3.1  ERROR HANDLING + FAIL-SOFT LOOP  [REQUIREMENT]
+  Wrap each capture in try/except. In --continuous, one camera hiccup (offline,
+  RTSP timeout, auth) must NOT kill the loop: log a WARNING, SKIP the sample,
+  continue to the next fixed-period tick (2.2). NO inline retry (it eats the next
+  tick). Keep fail-FAST on CONFIG errors (bad flags, missing stream, bad cache
+  dir). In --one-shot a capture error is a clean nonzero exit (fail-fast is fine).
+
+3.2  HEARTBEAT / LIVENESS  [REQUIREMENT]
+  Liveness must let the data plane distinguish "running but producing no upload"
+  from "crashed." The mechanism DIFFERS by mode, because the two modes have very
+  different output rates and purposes:
+
+  --one-shot (uploads):  emit plugin.duration.* phase timing for the single
+    capture (e.g. grab + save/inject, and the upload stage). The upload record
+    itself is the primary liveness signal; plugin.duration.* adds per-run timing.
+    Keep plugin.duration.* in NANOSECONDS to match the fleet convention (ToDo #21).
+    (One-shot is short-lived and externally scheduled, so no periodic heartbeat is
+    needed — each run either uploads + emits its duration, or exits nonzero.)
+
+  --continuous (local-only cache producer):  a PERIODIC CACHE HEARTBEAT, NOT a
+    per-cycle event. The continuous loop can fire every second, so publishing a
+    liveness event per capture would flood the data plane. Instead publish ONE
+    heartbeat event ROUGHLY ONCE A MINUTE (decoupled from the sample interval)
+    summarizing the cache state. It is the sole liveness signal in this mode
+    (continuous never uploads, so there is no upload record to imply "alive").
+      CADENCE: a fixed heartbeat interval, default ~60 s, configurable via
+        --heartbeat-secs (independent of --continuous <SECONDS>). Emit on a
+        monotonic grid like the capture loop (2.2); if the sample interval is
+        longer than the heartbeat interval, emit at most one heartbeat per sample
+        (never more often than there is news). The heartbeat fires even if recent
+        captures were skipped/failed — that is exactly the "running but silent"
+        case it exists to reveal.
+      PAYLOAD (simple cache stats, per cache-name / per stream as applicable):
+        - total number of images currently in the --cache-dir (the managed v2 set)
+        - total disk space used by those cache images (bytes)
+        Optional, cheap-to-add: images written since the last heartbeat, images
+        evicted since the last heartbeat, last capture status (ok/skip/fail), and
+        the cache-name + camera so multi-stream/multi-config nodes disaggregate.
+      TOPIC: publish under a clear namespace, e.g. env.imagesampler.cache.count and
+        env.imagesampler.cache.bytes (final topic names TBD at implementation; keep
+        them distinct from any plugin.* reserved/standard names).
+    plugin.duration.* does NOT apply in --continuous mode: there is no discrete
+    "run" to time, and per-capture timing at up-to-1 Hz would be noise. The cache
+    heartbeat replaces it as the liveness + progress signal.
+
+3.3  CLEAN SELF-EXIT: --max-count / --max-runtime  [REQUIREMENT]
+  Provide bounded self-exit for windowed scheduling friendliness (default 0 =
+  unbounded, preserving --continuous "forever"). --max-count N exits after N
+  captures; --max-runtime S exits after S wall-clock seconds. Check at the loop
+  tail (before sleeping, adding the interval) so exit lands on a window edge.
+  (Less critical here — the sampler is CPU-only — but keeps parity with the fleet
+  and helps compose producer windows.)
+
+3.4  IMAGE FORMAT / QUALITY / RESIZE  [REQUIREMENT, reconcile — see 4.5]
+  Upstream lacked --jpeg-quality/--resize. These are desirable for training-data
+  size and bandwidth, BUT they CONFLICT with the raw-native-bytes mandate (2.3):
+  resizing/re-compressing REQUIRES decode+re-encode, which destroys camera
+  metadata. Reconciliation is OPEN (4.5): likely resize/quality applies ONLY to
+  the re-encode/fallback path, or produces a SEPARATE derived image alongside the
+  raw one. Do NOT silently re-encode a native-raw image to honor a resize flag.
+
+3.5  DEPENDENCY / DOCS MODERNIZATION  [REQUIREMENT]
+  Drop croniter (unused after 2.2). Refresh the stale README dev note. Remove the
+  leftover upload.py helper cruft. Pin current pywaggle.
+
+3.6  TESTS  [REQUIREMENT]
+  Add tests: mock Camera; verify v2 filename formatting, fixed-period scheduling
+  math (drift-free + skip-on-overrun), ring eviction (count + size caps, evict-
+  before-write, oversized-new-image drop), EXIF/UserComment round-trip, --from-
+  cache newest-selection, and fail-fast on each config error.
+
+
+═══════════════════════════════════════════════
+PART 4 — OPEN / UNRESOLVED
+═══════════════════════════════════════════════
+Genuinely open items requiring a decision or a check before/at build.
+
+4.1  CACHE HOME: under uploads mount (A) vs dedicated subtree (B)  [RESOLVED 2026-07-06 -> B]
+  DECISION: (B) a dedicated subtree OUTSIDE the upload mount. Empirically resolved
+  by reading the upload-agent source (waggle-sensor/wes-upload-agent, main.sh):
+    - The agent loops forever over `/uploads` (host /media/plugin-data/uploads),
+      running find_uploads_in_cwd(): `find . -mindepth 3 -maxdepth 4 -type d`
+      filtered to paths shaped like `[<job>/]<plugin>/<version>/<ts>-<sha1hex>/`
+      where <version> matches x.y.z | vx.y.z | latest | test and the leaf matches
+      `<digits>-<hexdigits>` (the pywaggle staging dir containing {data,meta}).
+    - For every match it rsyncs to beehive with `--remove-source-files`, i.e. it
+      UPLOADS AND THEN DELETES the staged files, and rmdirs emptied dirs.
+  So option (A) is doubly wrong for a LOCAL-ONLY ring (2.8): the agent would
+  (i) upload files we must never upload, and (ii) DELETE our ring files out from
+  under our own eviction logic. Even though our flat v2 filename
+  (`<ts>-v2-<vsn>-<camera>.jpg`, no data/meta pair, no x.y.z dir) would not match
+  the regex today, relying on out-guessing the agent's scan is fragile.
+  RESOLUTION: write the ring under a dedicated subtree, default
+  `<cache-dir>/<camera>/`, that is NOT inside the upload mount. Operator points
+  `--cache-dir` at it; for pluginctl testing use `-v <hostdir>:<cache-dir>`; for a
+  scheduled job, provision a hostPath/uservolume (deployment detail, see Stage-4
+  design note). This has zero accidental-upload/delete risk and does not depend on
+  the agent's scan pattern.
+
+4.2  CROSS-USER READ PERMISSIONS ON CACHE FILES  [OPEN]
+  Confirm the uid the sampler writes with and whether a consumer pod running as a
+  DIFFERENT user can read the files (the "visible to all users" half of R-B).
+  Likely need world-readable files + traversable dirs; verify on-node and, if
+  needed, chmod on write. (Two on-node probes for this were not completed.)
+
+4.3  EXACT NATIVE STILL URLs + AUTH PER CAMERA  [OPEN]
+  Reolink cmd=Snap confirmed working with admin creds on H00F. Confirm the exact
+  still-endpoint URL + auth for Hanwha (stw-cgi) and Mobotix (image.jpg/
+  current.jpg) as used by the plugin. (Reolink creds are query-params; do not
+  hardcode; parameterize.)
+
+4.4  EXIF-INJECTION LIBRARY (inject without re-encode)  [RESOLVED 2026-07-05]
+  Requirement (2.3/2.11): insert EXIF/UserComment into an existing JPEG byte
+  stream WITHOUT a pixel decode/re-encode, preserving camera segments (Mobotix
+  M1IMG COM etc.). DECISION: use piexif (pure-Python, MIT) — build the block with
+  piexif.dump() and insert with piexif.insert(). VERIFIED by a Stage-1.5 spike on
+  a JPEG carrying a foreign COM segment:
+    - piexif.insert splits the JPEG into segments and re-emits them, inserting our
+      APP1/Exif at position 1 and pushing existing foreign segments down — it does
+      NOT strip them. Foreign COM (M1IMG) survived intact.
+    - The compressed pixel scan (SOS..EOI) was BYTE-IDENTICAL before/after — proof
+      there is no pixel re-encode (piexif never touches Pillow/pixels).
+    - Our 13-field UserComment JSON round-trips; SHA256 ImageUniqueID round-trips.
+    - Result is a valid decodable JPEG.
+  API QUIRKS to honor in Stage 2 (learned in the spike):
+    - piexif.insert(exif_bytes, image, new_file): with in-memory BYTES for image
+      you MUST pass a 3rd sink (an io.BytesIO or a path); it only writes in place
+      when image is a filename. (Bare bytes with no sink raises ValueError.)
+    - UserComment needs the 8-byte charset prefix b"ASCII\x00\x00\x00" + payload;
+      strip those 8 bytes when reading back.
+    - GPS: piexif CANNOT take signed lat/lon — store ABS value as DMS rationals
+      plus a ref ("N"/"S", "E"/"W"). H00F lon -87.9827 -> (87,1)(58,1)... ref="W".
+      (Signed values raise struct.error in piexif.dump.)
+    - SHA256 unique_id semantics: see 4.6 (hash of the ORIGINAL frame, not the
+      final injected bytes — a self-hash cannot live inside the bytes it hashes).
+  Fallback/opencv-reencoded path: same piexif.insert on the re-encoded bytes (no
+  foreign segments to preserve there). Add piexif to requirements.txt.
+
+4.6  SHA256 unique_id semantics (resolves a 2.11 self-reference)  [RESOLVED 2026-07-06]
+  2.11 field 9 (unique_id) is a SHA256 that (a) must be a stable construction-
+  guaranteed key and (b) is embedded in EXIF. The original 2.11 phrasing ("SHA256
+  of the FINAL saved bytes") is impossible for an EMBEDDED value: adding the hash
+  to the EXIF changes the bytes, so a hash of the final file can never equal a
+  value stored inside that file (self-reference paradox). DECISION (verified on
+  H00F 2026-07-06):
+    - unique_id = SHA256 of the ORIGINAL captured frame bytes (camera's raw JPEG,
+      BEFORE any EXIF injection). Stable, reproducible from the source frame,
+      uniquely identifies the capture. Written to BOTH the UserComment JSON and
+      the standard EXIF ImageUniqueID tag (they agree — verified).
+    - Pixels are never re-encoded, so the embedded frame's compressed data is
+      byte-identical to the source (verified: SOS..EOI scan identical on a real 4K
+      Reolink frame; only ~984 bytes of APP1 added).
+    - If an object-integrity hash of the FINAL stored bytes is ever wanted, it
+      belongs in the UPLOAD META at Stage 3 (outside the file), where it can equal
+      the stored object without paradox. NOT embedded.
+  This supersedes the "hash of final bytes" wording in 2.11/4.4.
+
+4.5  RESIZE/QUALITY vs NEVER-RE-ENCODE reconciliation  [OPEN]
+  Decide how --jpeg-quality/--resize (3.4) coexist with the raw-native mandate
+  (2.3). Options: (a) resize/quality apply ONLY on the re-encode/fallback path;
+  (b) produce a SEPARATE derived (resized) image alongside the untouched raw; (c)
+  drop resize/quality entirely (raw only; consumers resize downstream). Needs
+  Pete's call; do not silently re-encode a native-raw image.
+
+
+═══════════════════════════════════════════════
+PART 5 — PLANNED ENHANCEMENTS (post-robust-testing backlog)
+═══════════════════════════════════════════════
+Intentionally DEFERRED until the core (one-shot upload; continuous ring cache with
+cross-plugin visibility via convention) is working robustly in testing. Do NOT
+implement before the base is solid.
+
+5.1  CACHE DISCOVERY / ANNOUNCEMENT  [DEFERRED]
+  Instead of consumers relying purely on CONVENTION (2.12), have the sampler
+  ANNOUNCE its cache so consumers discover path + camera + config dynamically:
+    - Publish a Waggle record (e.g. env.imagesampler.cache_path) with cache-name,
+      camera, config summary, on-node path; consumers query the data plane.
+    - AND/OR a manifest file at a well-known name (<SHARED_ROOT>/<cache-name>/
+      manifest.json) describing camera, config (resolution, white balance,
+      interval), ring caps, schema.
+  Rationale: robust to naming changes and multi-config nodes. Deferred because
+  convention suffices for v1 and announcement is a discovery contract to design
+  once the mechanics are proven.
+
+5.2  --from-cache TIME-WINDOW SELECTION  [DEFERRED]
+  v1 --from-cache selects only NEWEST (2.8). Add timestamp selectors so a caller
+  (esp. cloud-side) can pull the cached image matching a moment:
+    --closest-before-timestamp <ns> : newest cached image with capture_ts <= T.
+    --closest-after-timestamp  <ns> : oldest cached image with capture_ts >= T.
+  Use case: a remote event at instant T -> pull this node's nearest cached frame
+  for another view. Selection uses the capture-ts prefix in the v2 filename.
+  Corner cases to specify: no image satisfies the bound (fail-fast); ties;
+  eviction between select and upload (ENOENT -> "gone", per 2.12 TOCTOU rule).
+
+
+═══════════════════════════════════════════════
+BOTTOM LINE
+═══════════════════════════════════════════════
+image-sampler2 turns the upstream single-purpose frame grabber into a cheap,
+CPU-only PRODUCER in a producer/consumer architecture. Its job is to acquire
+frames (preferring raw native bytes so camera metadata survives), stamp them with
+authoritative node-clock capture time and self-describing EXIF under a collision-
+proof v2 name, and either upload once (--one-shot, from camera or --from-cache) or
+maintain a bounded, shared, per-stream local ring cache (--continuous) that other
+plugins consume — batch-inferring on the GPU, uploading only what matters, and
+freeing the GPU between windows.
+The design is LOCKED across modes, scheduling, acquisition/metadata, EXIF, naming,
+timestamps, caching, and the shared-cache concept, and is VERIFIED against live
+node/fleet data for the pywaggle mechanics, metadata evidence, uniqueness/coarse-
+clock behavior, the WES shared mount, and back-dated-timestamp handling. What
+remains are the Part 4 open items (cache home + permissions, still-endpoint URLs,
+EXIF-injection library, resize-vs-raw) and the Part 5 deferred enhancements —
+after which this becomes the staged implementation plan (aligns with ToDo #23
+Stage 5, the periodic sampler).

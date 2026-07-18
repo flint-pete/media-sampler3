@@ -1,0 +1,69 @@
+# ──────────────────────────────────────────────────────────────
+# image-sampler2 — PRODUCER (continuous local ring cache)
+#
+# Fills a bounded, per-stream local ring cache with capture-time-named, EXIF-
+# embedded frames. LOCAL-ONLY: this job NEVER uploads (design §2.8). Pair it with
+# the from-cache UPLOADER job (uploader-from-cache.yaml) to get periodic cloud
+# snapshots without hammering the camera or holding the network open.
+#
+# This is the "producer" half of the producer/consumer split (§2.1): one cheap
+# producer fills a cache that any number of consumers (this uploader, YOLO,
+# BioClip, BirdNet) can read.
+#
+# CREDENTIALS: camera user/password are read from the environment
+# (CAMERA_USER / CAMERA_PASSWORD) ONLY — never as args (keeps them out of argv,
+# process listings, and the scheduler job record; see Infra #10). Provide them via
+# a Kubernetes Secret referenced by the pod (envFrom/secretRef). Create the Secret
+# once on the node, e.g.:
+#   kubectl create secret generic hummingcam-creds \
+#     --from-literal=CAMERA_USER=sage --from-literal=CAMERA_PASSWORD='<password>'
+# (Confirm the SES pluginSpec field that maps a secretRef into the pod env for
+# your scheduler version — see Infra #10; if envFrom is unsupported, use pluginctl
+# --env-from for node-local testing.)
+#
+# CACHE LOCATION: --cache-root defaults to /local-cache (falls back to /tmp when
+# absent). For a persistent, cross-consumer-readable cache the CI team is expected
+# to provide a node-persistent /local-cache mount (§2.12, Infra deferred 4.2).
+#
+# Submit (with a write-scoped token):
+#   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/producer-continuous.yaml
+#   sesctl ... submit -j <returned-id>
+# ──────────────────────────────────────────────────────────────
+name: image-sampler2-producer
+plugins:
+  - name: image-sampler2-producer
+    pluginSpec:
+      image: registry.sagecontinuum.org/beckman/image-sampler2:0.5.1
+      args:
+        - "--continuous"
+        - "60"                       # capture every 60s onto the ring
+        - "--stream"
+        - "top"                      # ONE stream per process (§2.6/a1)
+        - "--cache-root"
+        - "/local-cache"             # persistent cross-consumer root (§2.12)
+        - "--cache-name"
+        - "hummingcam"               # <cache-root>/hummingcam/top/ (known path)
+        - "--cache-max-count"
+        - "120"                      # ring bound: keep newest 120 frames
+        - "--heartbeat-secs"
+        - "60"                       # liveness beat every 60s (§3.2)
+        - "--camera-host"
+        - "10.107.0.221"
+        - "--camera-port"
+        - "10000"
+        - "--job"
+        - "hummingcam"
+      # Credentials come from a Secret, NOT args. Map CAMERA_USER/CAMERA_PASSWORD
+      # into the pod env here (field name depends on the SES schema version):
+      #   envFrom:
+      #     - secretRef:
+      #         name: hummingcam-creds
+      selector:
+        zone: core
+nodes:
+  H00F: true
+scienceRules:
+  # Keep the producer running (it loops forever; restart if it exits).
+  - "schedule(image-sampler2-producer): cronjob('image-sampler2-producer', '@reboot')"
+successcriteria:
+  - WallClock('30day')

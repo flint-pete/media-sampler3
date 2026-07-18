@@ -1,0 +1,2 @@
+pywaggle == 0.56.*
+piexif == 1.1.*

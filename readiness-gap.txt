@@ -1,0 +1,105 @@
+image-sampler2 — READINESS GAPS: what's left to be usable
+==========================================================
+Snapshot: 2026-07-07, at v0.5.1 (Stage 6 + 3.3 shipped, 229 tests, verified
+on-node H00F). The CODE is essentially done and correct; "usable" in the
+ARCHITECTURAL sense (a producer whose output another plugin can actually consume,
+deployable by the normal path, with real identity) is blocked mostly UPSTREAM.
+
+Tiers: BLOCKER = stops real use · LIMITER = limits reach · POLISH = deferrable.
+"Control" = whether WE can fix it, or it's a Sage-side dependency.
+
+----------------------------------------------------------------------------------
+BLOCKER 1 — Producer with no way to consume (the /local-cache mount gap)
+----------------------------------------------------------------------------------
+The whole point is producer/consumer: one plugin fills a shared ring, other
+plugins (YOLO/BioCLIP) read it. That requires a shared, node-persistent
+/local-cache mount that does not exist on a stock node yet:
+  - cache root resolves --cache-root > $IS2_CACHE_ROOT > /local-cache (default).
+    There is NO /tmp fallback anymore: as of v0.5.1 the code FAILS FAST with a
+    clear message if the resolved cache root is not an existing, writable dir.
+    (The old silent /tmp fallback was removed — it "worked" but produced frames
+    no consumer pod could ever read, a footgun. See CHANGELOG [Unreleased].)
+  - So today, with no /local-cache mounted, image-sampler2 refuses to run in
+    continuous mode rather than producing into a black hole. The producer is
+    correct and ready; it is waiting on the mount, not on a code change.
+FULL DESIGN: the wes-local-cache-manager repo (DESIGN-AND-PURPOSE.md = two-layer
+eviction model + the WES manager DaemonSet, modeled on the EXISTING /uploads
+architecture; HANDOFF.md = the mount mechanics). Key source-verified facts:
+  - /uploads is ALREADY a shared hostPath (/media/plugin-data/uploads/<job>/
+    <plugin>/<tag>) drained by the wes-upload-agent DaemonSet. /local-cache should
+    copy this exact pattern (a sibling /media/plugin-data/local-cache tree + a
+    manager pod). The node already does this shape — it's not a new invention.
+  - The pluginSpec ALREADY has a Volume (hostPath) mount field (Infra #9 CORRECTED
+    2026-07-08); the gaps are nodeSelector-gating, an unresolved root-ownership
+    security TODO, and no docs — NOT absence of the field.
+  - NO storage quota exists today (verified): SES wires only cpu/memory/gpu
+    limits, no ephemeral-storage; and hostPath writes are NOT counted by kubelet
+    ephemeral-storage accounting anyway. So a purpose-built Layer-2 quota (the
+    manager pod) is the ONLY thing that can bound /local-cache. Only backstop
+    today is generic node disk-pressure eviction.
+Coupled upstream: Infra #9 (mount field: exists-but-gated) and Infra #4.2 (Sage CI
+must provision the node-persistent /local-cache mount + the manager pod).
+CONTROL: split. Our code already ASSUMES /local-cache and uses it with zero
+changes the moment it's mounted. The Layer-1 cache primitive
+is ours (pywaggle2 / cache.py); the Layer-2 mount + manager pod + node provisioning
+are upstream (WES). Needs the design doc filed as issues on waggle-edge-stack.
+
+----------------------------------------------------------------------------------
+BLOCKER 2 — Cross-user cache reads unverified (design 4.2, OPEN)
+----------------------------------------------------------------------------------
+Even WITH a shared mount, the premise requires a consumer pod running as a
+DIFFERENT user to read the producer's files. Flagged OPEN; the on-node probes were
+never done. If reads fail we likely need world-readable files + traversable dirs
+(chmod-on-write) — a small code change.
+CONTROL: ours (needs an on-node probe) — but moot until Blocker 1's mount exists
+to test against.
+
+----------------------------------------------------------------------------------
+BLOCKER 3 — ECR builds dead -> not deployable via the normal path (Infra #2)
+----------------------------------------------------------------------------------
+Filed: waggle-edge-stack#110. runc /proc/acpi masking regression breaks every RUN
+step fleet-wide. Deployable TODAY only via podman-build + pluginctl side-load (the
+private path we've used all along).
+CONTROL: upstream. Not our bug, not fixable by us.
+
+----------------------------------------------------------------------------------
+LIMITER 1 — Placeholder node identity (Infra #1)
+----------------------------------------------------------------------------------
+VSN is a placeholder ("NODE"); lat/lon omitted. Beehive attaches real vsn=H00F
+downstream so ATTRIBUTION is correct, but the plugin can't write a correct
+self-describing filename or embed a real EXIF geotag. Single swap-in point:
+nodemeta.py::_runtime_identity(), marked TODO(sage-ci).
+CONTROL: upstream (awaiting pywaggle/WES runtime GPS+VSN calls) — trivial for us
+to wire once they land. See sage-design-planning/pywaggle2-design.md §2.
+
+----------------------------------------------------------------------------------
+LIMITER 2 — Single-vendor cameras (Infra #4.3, OPEN)
+----------------------------------------------------------------------------------
+Only Reolink cmd=Snap implemented. Hanwha SUNAPI + Mobotix native-still builders
+spec'd but not built; OpenCV/RTSP fallback (acquire.py::capture_opencv_fallback)
+is a stub that raises. So today image-sampler2 can only talk to Reolink.
+CONTROL: ours for Hanwha SUNAPI (mirrors Reolink) — but needs a reachable Hanwha
+to verify the MJPEG-profile / EXIF questions. This is the image-sampler2 slice of
+the pywaggle2 acquisition ladder (sage-design-planning/pywaggle2-design.md §1).
+
+----------------------------------------------------------------------------------
+POLISH (all in our control, genuinely deferrable)
+----------------------------------------------------------------------------------
+- 4.5 resize/quality vs never-re-encode (OPEN; needs Pete's decision — currently
+  raw-only, a defensible permanent answer).
+- 5.2 --from-cache time-window selectors (--closest-before/after-timestamp;
+  newest-only works today).
+- 5.1 cache discovery/announcement (convention suffices for v1).
+
+----------------------------------------------------------------------------------
+BOTTOM LINE
+----------------------------------------------------------------------------------
+The code is done and correct (all modes built, tested, verified on real hardware).
+It is NOT yet "usable" architecturally, and the reasons are mostly UPSTREAM:
+  - producer/consumer loop can't function on a node without a shared /local-cache
+    mount (+ schema to request it) — currently a producer writing to a black hole;
+  - normal deployment is blocked by the ECR bug;
+  - real identity/geotags are blocked on the pywaggle/WES runtime calls.
+What's genuinely OURS left to finish: cross-user permission probe (once a mount
+exists), Hanwha camera support (once we have hardware), and the resize/quality
+decision. Everything else waits on Sage.
