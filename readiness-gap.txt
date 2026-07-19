@@ -10,6 +10,7 @@ Tiers: BLOCKER = stops real use · LIMITER = limits reach · POLISH = deferrable
 
 ----------------------------------------------------------------------------------
 BLOCKER 1 — Producer with no way to consume (the /local-cache mount gap)
+  ** RESOLVED 2026-07-19 (verified live on H00F). See note at end of section. **
 ----------------------------------------------------------------------------------
 The whole point is producer/consumer: one plugin fills a shared ring, other
 plugins (YOLO/BioCLIP) read it. That requires a shared, node-persistent
@@ -43,6 +44,18 @@ CONTROL: split. Our code already ASSUMES /local-cache and uses it with zero
 changes the moment it's mounted. The Layer-1 cache primitive
 is ours (pywaggle2 / cache.py); the Layer-2 mount + manager pod + node provisioning
 are upstream (WES). Needs the design doc filed as issues on waggle-edge-stack.
+
+** RESOLVED 2026-07-19 — verified live on H00F: **
+  - /media/plugin-data/local-cache exists, mode drwxrwxrwt (world-writable, sticky).
+  - wes-local-cache-manager DaemonSet pod Running (10d) — the Layer-2 manager we
+    spec'd is deployed.
+  - The producer/consumer loop is LIVE: image-sampler2 fills
+    /local-cache/hummingcam/top/, and sage-yolo2 + sage-bioclip2 consumers read it
+    (yolo2 writes /local-cache/hummingcam-crops/... back; .state/sage-yolo2 present).
+  - Consumers mount it via `-v /media/plugin-data/local-cache:/local-cache`
+    (hostPath volume, mountPath /local-cache). media-sampler3 uses the SAME mount and
+    writes its own subtree via --cache-name (e.g. hummingcam-audio/) alongside the
+    image cache. No code change needed — the plugin was ready; the mount now exists.
 
 ----------------------------------------------------------------------------------
 BLOCKER 2 — Cross-user cache reads unverified (design 4.2, OPEN)
