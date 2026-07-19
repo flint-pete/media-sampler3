@@ -14,6 +14,18 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Added
+- **Audio producer wired end-to-end (`--media audio`).** The continuous producer
+  now captures FLAC/WAV clips into the same ring as JPEG frames, each with a
+  `<clip>.json` v2 sidecar. New modules `audio_metadata` (sidecar field dict) and
+  `audio_acquire` (bounded ffmpeg capture) feed `app._audio_capture_to_tmp` →
+  `cache.commit_capture_pair`. New CLI: `--media {image,audio}`, `--audio-source`,
+  `--source-type {camera_still,camera_mic,usb_mic,rtsp_audio,file}`,
+  `--clip-seconds` (defaults to the `--continuous` period), `--audio-format
+  {flac,wav}`, `--bandpass-fmax`. The image path is unchanged and fully
+  back-compatible (`--media` defaults to image; audio flags rejected in image
+  mode). Ring counts/evicts by CLIP; sidecar rides along (sidecar-first commit).
+  Source label = the `--stream`/`--name` value; recorded as `source`/`source_type`
+  (mics are not cameras) with `camera` kept as a back-compat alias.
 - **Forked from image-sampler2 v0.5.1 as media-sampler3** (2026-07-15). New plugin
   lineage: a more versatile producer that captures BOTH JPEG frames AND audio clips
   into the shared `/local-cache` using the same v2 self-describing cache-frame

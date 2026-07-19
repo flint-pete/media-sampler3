@@ -22,6 +22,8 @@ import sys
 import time
 
 import acquire
+import audio_acquire
+import audio_metadata
 import cache
 import capture as capture_mod
 import heartbeat as heartbeat_mod
@@ -116,6 +118,37 @@ def build_parser():
         help='ONE-SHOT ONLY. Instead of hitting the camera, upload the NEWEST '
              'image already present in cache DIR (populated by a --continuous '
              'producer). Does not touch the camera, write, or evict.')
+
+    # --- media type + audio (design AUDIO-EXTENSION-DESIGN §6) ------------------
+    # The producer captures either JPEG frames (default, back-compat) or audio
+    # clips into the SAME ring, using the sidecar-JSON v2 contract for audio.
+    parser.add_argument(
+        '--media', dest='media', choices=('image', 'audio'), default='image',
+        help='Media type to capture: image (JPEG stills, default) or audio (clips '
+             'into the ring with a <clip>.json sidecar). Audio needs --audio-source.')
+    parser.add_argument(
+        '--audio-source', dest='audio_source', metavar='SRC', default=None,
+        help='AUDIO: the source to record from -- a URL (Reolink FLV / RTSP audio) '
+             'or an ALSA device (e.g. hw:1,0 with --source-type usb_mic).')
+    parser.add_argument(
+        '--source-type', dest='source_type', default='usb_mic',
+        choices=sorted(audio_metadata.SOURCE_TYPES),
+        help='AUDIO: how the clip is captured (%(choices)s). Drives the ffmpeg '
+             'input mode and is recorded in the sidecar. Default usb_mic.')
+    parser.add_argument(
+        '--clip-seconds', dest='clip_seconds', metavar='SECONDS', type=int,
+        default=None,
+        help='AUDIO: clip duration in seconds. Defaults to the --continuous period '
+             '(so back-to-back clips tile the timeline) or 10 in one-shot.')
+    parser.add_argument(
+        '--audio-format', dest='audio_format', choices=('flac', 'wav'),
+        default='flac',
+        help='AUDIO: container/codec. flac (lossless, smaller, default) or wav.')
+    parser.add_argument(
+        '--bandpass-fmax', dest='bandpass_fmax', metavar='HZ', type=int,
+        default=None,
+        help='AUDIO: apply a lowpass at HZ (Nyquist guard for bandwidth-limited '
+             'mics, e.g. 8000 for a 16 kHz camera mic). Omit for no filtering.')
 
     # --- continuous ring cache (2.6 / 2.12) ------------------------------------
     parser.add_argument(
@@ -288,6 +321,27 @@ def validate_args(args):
         raise ConfigError(
             f"--name count ({len(names)}) must match --stream count ({len(streams)})")
 
+    # --- media type + audio rules (both modes) --------------------------------
+    media = getattr(args, "media", "image")
+    audio_flags = [
+        ("--audio-source", getattr(args, "audio_source", None) is not None),
+        ("--clip-seconds", getattr(args, "clip_seconds", None) is not None),
+        ("--bandpass-fmax", getattr(args, "bandpass_fmax", None) is not None),
+    ]
+    if media == "audio":
+        if not getattr(args, "audio_source", None):
+            raise ConfigError("--media audio requires --audio-source "
+                              "(a URL or an ALSA device like hw:1,0)")
+        cs = getattr(args, "clip_seconds", None)
+        if cs is not None and cs <= 0:
+            raise ConfigError(f"--clip-seconds must be a positive integer (got {cs})")
+        # source_type / audio_format enums are enforced by argparse choices.
+    else:  # image: audio-only flags are meaningless -> fail-fast
+        offending = [flag for flag, present in audio_flags if present]
+        if offending:
+            raise ConfigError("audio flags are only valid with --media audio; "
+                              f"remove {', '.join(offending)} in image mode")
+
     # cache flags: which ones were supplied?
     cache_flags_set = [
         ('--cache-root', args.cache_root is not None),
@@ -385,7 +439,11 @@ def summarize(args):
     if getattr(args, "max_runtime", 0):
         bounds.append(f"max_runtime={args.max_runtime}s")
     bounds_str = f" bounds=[{', '.join(bounds)}]" if bounds else " bounds=none"
-    return (f"mode=continuous interval={args.continuous}s streams={args.stream} "
+    media = getattr(args, "media", "image")
+    media_str = (f"media=audio(src={args.audio_source},type={args.source_type},"
+                 f"fmt={args.audio_format})" if media == "audio" else "media=image")
+    return (f"mode=continuous {media_str} interval={args.continuous}s "
+            f"streams={args.stream} "
             f"names={args.name or '(auto)'} cache_root={args.cache_root or '(auto)'} "
             f"cache_name={args.cache_name or '(job)'} caps=[{', '.join(caps)}] "
             f"heartbeat={args.heartbeat_secs or 60}s{bounds_str}")
@@ -581,6 +639,43 @@ def run_dual_grid_loop(*, capture_interval_s, do_capture, heartbeat, do_heartbea
             return iters
 
 
+def _audio_capture_to_tmp(*, source, source_type, clip_seconds, capture_timeout,
+                          fmt, bandpass_fmax, vsn, node_id, job, task,
+                          plugin_version, stream_label, lat, lon, dest_dir):
+    """Capture one audio clip + build its sidecar, both staged as .tmp in dest_dir.
+
+    The audio analog of capture.capture_and_embed_to_tmp: grab a bounded clip
+    (ffmpeg) into <final>.tmp, compute the v2 field dict (source=stream_label),
+    write the sidecar to <final>.json.tmp. The caller commits the PAIR atomically
+    via cache.commit_capture_pair (sidecar-first). Raises audio_acquire.CaptureError
+    on grab failure (fail-soft at the caller). Returns:
+        {final_name, clip_tmp, sidecar_tmp, final_bytes, capture_ts_ns, unique_id}
+    """
+    capture_ts_ns = metadata.now_capture_ts_ns()
+    final_name = audio_metadata.build_audio_name(capture_ts_ns, vsn, stream_label,
+                                                 fmt=fmt)
+    clip_tmp = os.path.join(dest_dir, final_name + ".tmp")
+
+    # grab the clip straight into the .tmp (ffmpeg validates + cleans on failure)
+    audio_acquire.capture_clip(
+        source=source, source_type=source_type, out_path=clip_tmp,
+        clip_seconds=clip_seconds, timeout_s=capture_timeout, fmt=fmt,
+        bandpass_fmax=bandpass_fmax)
+
+    raw = open(clip_tmp, "rb").read()
+    unique_id = audio_metadata.sha256_hex(raw)
+    fields = audio_metadata.build_audio_field_dict(
+        vsn=vsn, node_id=node_id, job=job, task=task, plugin=plugin_version,
+        source=stream_label, source_type=source_type,
+        capture_ts_ns=capture_ts_ns, upload_ts_ns=None, lat=lat, lon=lon,
+        unique_id=unique_id, fmt=fmt)
+    sidecar_tmp = audio_metadata.write_sidecar(clip_tmp, fields)  # <clip_tmp>.json
+
+    return {"final_name": final_name, "clip_tmp": clip_tmp,
+            "sidecar_tmp": sidecar_tmp, "final_bytes": len(raw),
+            "capture_ts_ns": capture_ts_ns, "unique_id": unique_id}
+
+
 def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
                          monotonic=None, sleep=None):
     """--continuous producer: capture on a fixed grid into a per-stream ring
@@ -590,11 +685,20 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
     runtime: a bad capture or FS hiccup warns and skips; the loop keeps running.
     `max_ticks`/`plugin`/`monotonic`/`sleep` are injection points for tests.
     """
-    try:
-        url, ident, camera_name = _resolve_camera_config(args)
-    except ConfigError as e:
-        logger.error("config error: %s", e)
-        return EXIT_CONFIG_ERROR
+    is_audio = getattr(args, "media", "image") == "audio"
+    if is_audio:
+        # Audio needs identity + the stream label, but no camera URL/creds.
+        ident = nodemeta.resolve_identity(
+            vsn=args.vsn, node_id=args.node_id, lat=args.lat, lon=args.lon,
+            manifest_path=args.node_manifest)
+        camera_name = (args.name[0] if args.name else args.stream[0])
+        url = None
+    else:
+        try:
+            url, ident, camera_name = _resolve_camera_config(args)
+        except ConfigError as e:
+            logger.error("config error: %s", e)
+            return EXIT_CONFIG_ERROR
 
     if ident["vsn_is_placeholder"]:
         logger.warning("node VSN not resolvable at runtime (sage-ci runtime VSN "
@@ -645,25 +749,48 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
     _mono = monotonic if monotonic is not None else time.monotonic_ns
     hb = heartbeat_mod.Heartbeat(hb_secs, start_ns=_mono())
 
+    # Audio clip length defaults to the capture interval so clips tile the timeline.
+    clip_secs = args.clip_seconds if getattr(args, "clip_seconds", None) else args.continuous
+
+    def _tick_audio():
+        """One audio tick: grab clip+sidecar, evict-plan, commit the pair.
+        Returns (written, evicted, final_name, final_bytes) or None on skip."""
+        cap = _audio_capture_to_tmp(
+            source=args.audio_source, source_type=args.source_type,
+            clip_seconds=clip_secs, capture_timeout=args.capture_timeout,
+            fmt=args.audio_format, bandpass_fmax=args.bandpass_fmax,
+            vsn=ident["vsn"], node_id=ident["node_id"], job=args.job, task=args.task,
+            plugin_version=args.plugin_version, stream_label=camera_name,
+            lat=ident["lat"], lon=ident["lon"], dest_dir=sdir)
+        ring = cache.scan_ring(sdir)
+        plan = cache.plan_evictions(ring, cap["final_bytes"],
+                                    args.cache_max_count, args.cache_max_mb)
+        res = cache.commit_capture_pair(sdir, cap["clip_tmp"], cap["sidecar_tmp"],
+                                        cap["final_name"], plan)
+        return res, cap
+
+    def _tick_image():
+        cap = capture_mod.capture_and_embed_to_tmp(
+            url=url, capture_timeout=args.capture_timeout,
+            vsn=ident["vsn"], node_id=ident["node_id"], job=args.job,
+            task=args.task, plugin_version=args.plugin_version,
+            camera=camera_name, lat=ident["lat"], lon=ident["lon"], dest_dir=sdir)
+        ring = cache.scan_ring(sdir)
+        plan = cache.plan_evictions(ring, cap["final_bytes"],
+                                    args.cache_max_count, args.cache_max_mb)
+        res = cache.commit_capture(sdir, cap["tmp_path"], cap["final_name"], plan)
+        return res, cap
+
     def one_tick():
         status = heartbeat_mod.STATUS_SKIP
         written = False
         evicted = 0
         try:
-            cap = capture_mod.capture_and_embed_to_tmp(
-                url=url, capture_timeout=args.capture_timeout,
-                vsn=ident["vsn"], node_id=ident["node_id"], job=args.job,
-                task=args.task, plugin_version=args.plugin_version,
-                camera=camera_name, lat=ident["lat"], lon=ident["lon"],
-                dest_dir=sdir)
-        except capture_mod.CaptureError as e:
+            res, cap = _tick_audio() if is_audio else _tick_image()
+        except (capture_mod.CaptureError, audio_acquire.CaptureError) as e:
             logger.warning("STAGE 4: capture skipped: %s", e)
             hb.record_capture(written=False, evicted=0, status=heartbeat_mod.STATUS_SKIP)
             return
-        ring = cache.scan_ring(sdir)
-        plan = cache.plan_evictions(ring, cap["final_bytes"],
-                                    args.cache_max_count, args.cache_max_mb)
-        res = cache.commit_capture(sdir, cap["tmp_path"], cap["final_name"], plan)
         for w in res.warnings:
             logger.warning("STAGE 4: %s", w)
         evicted = len(res.evicted)
