@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+# ANL:waggle-license
+#  This file is part of the Waggle Platform.  See LICENSE.waggle.txt.
+# ANL:waggle-license
+#
+# media-sampler3 -- audio_acquire tests (audio Stage 2).
+#
+# Offline: we don't run ffmpeg or touch hardware. We test command construction
+# (Reolink FLV / ALSA / RTSP), password redaction, format/duration validation,
+# timeout plumbing, and FLAC-magic validation of the produced bytes (ffmpeg mocked).
+
+import subprocess
+
+import pytest
+
+import audio_acquire
+
+
+# --- source URL / command builders ------------------------------------------
+
+def test_reolink_flv_url_has_query_param_auth():
+    url = audio_acquire.build_reolink_flv_url("10.0.0.5", 10000, "sage", "pw!42")
+    assert url.startswith("http://10.0.0.5:10000/flv?")
+    assert "user=sage" in url
+    assert "password=pw!42" in url  # Reolink compares literally; not re-encoded
+
+
+def test_reolink_flv_requires_host_and_creds():
+    with pytest.raises(ValueError):
+        audio_acquire.build_reolink_flv_url("", 10000, "sage", "pw")
+    with pytest.raises(ValueError):
+        audio_acquire.build_reolink_flv_url("h", 10000, "sage", None)
+
+
+def test_redact_hides_password():
+    url = audio_acquire.build_reolink_flv_url("h", 1, "sage", "SECRET99")
+    red = audio_acquire._redact(url)
+    assert "SECRET99" not in red
+    assert "password=***" in red
+
+
+def test_ffmpeg_cmd_for_http_source_extracts_audio_only():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="http://h:1/flv?x=1", source_type="camera_mic",
+        out_path="/t/c.flac", clip_seconds=10, fmt="flac", bandpass_fmax=8000)
+    assert cmd[0] == "ffmpeg"
+    assert "-vn" in cmd                      # drop video
+    assert "-t" in cmd and "10" in cmd       # bounded duration
+    assert "-i" in cmd
+    assert cmd[-1] == "/t/c.flac"
+    assert "flac" in " ".join(cmd)
+
+
+def test_ffmpeg_cmd_for_usb_mic_uses_alsa():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="hw:1,0", source_type="usb_mic",
+        out_path="/t/c.flac", clip_seconds=5, fmt="flac")
+    j = " ".join(cmd)
+    assert "-f alsa" in j
+    assert "hw:1,0" in j
+
+
+def test_ffmpeg_cmd_bandpass_applied_when_set():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="s", source_type="rtsp_audio", out_path="/t/c.flac",
+        clip_seconds=5, fmt="flac", bandpass_fmax=8000)
+    assert "-af" in cmd
+    assert "lowpass=f=8000" in cmd
+
+
+def test_ffmpeg_cmd_no_bandpass_when_unset():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="s", source_type="rtsp_audio", out_path="/t/c.flac",
+        clip_seconds=5, fmt="flac")
+    assert "-af" not in cmd
+
+
+def test_ffmpeg_cmd_rejects_bad_format():
+    with pytest.raises(ValueError):
+        audio_acquire.build_ffmpeg_cmd(source="s", source_type="usb_mic",
+                                       out_path="/t/c.mp3", clip_seconds=5, fmt="mp3")
+
+
+def test_ffmpeg_cmd_rejects_nonpositive_duration():
+    with pytest.raises(ValueError):
+        audio_acquire.build_ffmpeg_cmd(source="s", source_type="usb_mic",
+                                       out_path="/t/c.flac", clip_seconds=0, fmt="flac")
+
+
+# --- FLAC magic -------------------------------------------------------------
+
+def test_looks_like_flac():
+    assert audio_acquire.looks_like_flac(b"fLaC\x00\x00\x00\x22rest")
+    assert not audio_acquire.looks_like_flac(b"RIFF....WAVE")
+    assert not audio_acquire.looks_like_flac(b"")
+
+
+def test_looks_like_wav():
+    assert audio_acquire.looks_like_wav(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+    assert not audio_acquire.looks_like_wav(b"fLaC")
+
+
+# --- capture_clip (ffmpeg mocked) -------------------------------------------
+
+def _fake_run_ok(out_path, magic):
+    def run(cmd, **kw):
+        # simulate ffmpeg writing a valid file
+        with open(cmd[-1], "wb") as f:
+            f.write(magic + b"\x00" * 64)
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+    return run
+
+
+def test_capture_clip_returns_path_on_success(tmp_path, monkeypatch):
+    out = tmp_path / "1783-v2-H00F-usb_mic_0.flac"
+    monkeypatch.setattr(audio_acquire.subprocess, "run",
+                        _fake_run_ok(str(out), b"fLaC"))
+    p = audio_acquire.capture_clip(
+        source="hw:1,0", source_type="usb_mic", out_path=str(out),
+        clip_seconds=5, timeout_s=20, fmt="flac")
+    assert p == str(out)
+    assert audio_acquire.looks_like_flac(open(p, "rb").read())
+
+
+def test_capture_clip_timeout_raises(tmp_path, monkeypatch):
+    out = tmp_path / "c.flac"
+    def boom(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 1))
+    monkeypatch.setattr(audio_acquire.subprocess, "run", boom)
+    with pytest.raises(audio_acquire.CaptureTimeout):
+        audio_acquire.capture_clip(source="s", source_type="usb_mic",
+                                   out_path=str(out), clip_seconds=5,
+                                   timeout_s=1, fmt="flac")
+
+
+def test_capture_clip_nonzero_exit_raises(tmp_path, monkeypatch):
+    out = tmp_path / "c.flac"
+    def fail(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 1, b"", b"device busy")
+    monkeypatch.setattr(audio_acquire.subprocess, "run", fail)
+    with pytest.raises(audio_acquire.CaptureError):
+        audio_acquire.capture_clip(source="s", source_type="usb_mic",
+                                   out_path=str(out), clip_seconds=5,
+                                   timeout_s=10, fmt="flac")
+
+
+def test_capture_clip_bad_output_bytes_raises(tmp_path, monkeypatch):
+    # ffmpeg exits 0 but produced junk (not FLAC) -> treat as failure.
+    out = tmp_path / "c.flac"
+    monkeypatch.setattr(audio_acquire.subprocess, "run",
+                        _fake_run_ok(str(out), b"JUNK"))
+    with pytest.raises(audio_acquire.CaptureError):
+        audio_acquire.capture_clip(source="s", source_type="usb_mic",
+                                   out_path=str(out), clip_seconds=5,
+                                   timeout_s=10, fmt="flac")
