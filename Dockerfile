@@ -10,6 +10,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# System dep: ffmpeg. The audio path (--media audio) shells out to ffmpeg to
+# capture/encode bounded clips (same approach as the birdnet plugin). Only ffmpeg
+# is needed -- we invoke it as a subprocess and never decode audio in-process, so
+# no libsndfile/libasound are required. The image path uses no system libs.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 # Python deps only. We use pywaggle's CORE Plugin (waggle.plugin.Plugin) for
 # uploads/publishes -- NOT the [vision] extra (no cv2/OpenCV anywhere; the OpenCV
 # fallback in acquire.py is a stub, and frames are fetched via stdlib urllib). So
@@ -19,8 +27,9 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # The plugin modules: app + acquire/metadata/nodemeta/upload/capture/cache +
-# heartbeat (Stage-5 liveness). Copied AFTER the pip layer so code edits don't
-# invalidate the dependency cache.
-COPY app.py acquire.py metadata.py nodemeta.py upload.py capture.py cache.py heartbeat.py /app/
+# heartbeat (Stage-5 liveness) + audio_metadata/audio_acquire (the audio producer).
+# Copied AFTER the pip layer so code edits don't invalidate the dependency cache.
+COPY app.py acquire.py metadata.py nodemeta.py upload.py capture.py cache.py \
+     heartbeat.py audio_metadata.py audio_acquire.py /app/
 
 ENTRYPOINT ["python3", "-u", "/app/app.py"]

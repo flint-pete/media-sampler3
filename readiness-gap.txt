@@ -90,6 +90,17 @@ POLISH (all in our control, genuinely deferrable)
 - 5.2 --from-cache time-window selectors (--closest-before/after-timestamp;
   newest-only works today).
 - 5.1 cache discovery/announcement (convention suffices for v1).
+- CAMERA-MIC CREDENTIALS VIA K8S SECRET (audio, FUTURE ENHANCEMENT). For
+  --source-type camera_mic the plugin already reads CAMERA_USER/CAMERA_PASSWORD
+  from the environment (never the CLI, so no password in argv/ps/logs). The
+  remaining piece is the DEPLOYMENT wiring: the example job manifest
+  (jobs/producer-audio-continuous.yaml) should map those two vars from a Kubernetes
+  Secret via envFrom/secretRef, NOT inline in the YAML args — so the credential is
+  never written into the SES job record. (The birdnet plugin's Reolink job
+  currently inlines the password in argv/YAML; media-sampler3 must NOT copy that.)
+  Code is ready today; this is a manifest + docs enhancement. Confirm the SES
+  pluginSpec field that maps a secretRef into pod env for the current scheduler
+  version (see Infra #10).
 
 ----------------------------------------------------------------------------------
 BOTTOM LINE

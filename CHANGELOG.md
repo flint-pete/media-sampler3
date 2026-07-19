@@ -14,6 +14,13 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Fixed
+- **Dockerfile now installs ffmpeg + ships the audio modules.** The audio path
+  shells out to `ffmpeg`, which was not in the image (would fail `ffmpeg not found
+  on PATH`); added `apt-get install ffmpeg` (subprocess-only, so no libsndfile/
+  libasound needed). The `COPY` also omitted `audio_metadata.py` and
+  `audio_acquire.py` — the image would have `ImportError`'d on startup; both are now
+  copied. Verified in a built container: ffmpeg 7.1 present, modules import, and a
+  real synthetic clip encodes to a `.tmp` path and lands on a mounted `/local-cache`.
 - **Audio review fixes (pre-deployment code review).** (1) The ffmpeg subprocess
   timeout is now derived as `clip_seconds + 15s` inside `capture_clip`, instead of
   reusing the image `--capture-timeout` (default 10s) — which had silently killed
