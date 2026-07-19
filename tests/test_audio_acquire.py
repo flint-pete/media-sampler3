@@ -117,7 +117,7 @@ def test_capture_clip_returns_path_on_success(tmp_path, monkeypatch):
                         _fake_run_ok(str(out), b"fLaC"))
     p = audio_acquire.capture_clip(
         source="hw:1,0", source_type="usb_mic", out_path=str(out),
-        clip_seconds=5, timeout_s=20, fmt="flac")
+        clip_seconds=5, fmt="flac")
     assert p == str(out)
     assert audio_acquire.looks_like_flac(open(p, "rb").read())
 
@@ -129,8 +129,7 @@ def test_capture_clip_timeout_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(audio_acquire.subprocess, "run", boom)
     with pytest.raises(audio_acquire.CaptureTimeout):
         audio_acquire.capture_clip(source="s", source_type="usb_mic",
-                                   out_path=str(out), clip_seconds=5,
-                                   timeout_s=1, fmt="flac")
+                                   out_path=str(out), clip_seconds=5, fmt="flac")
 
 
 def test_capture_clip_nonzero_exit_raises(tmp_path, monkeypatch):
@@ -140,8 +139,7 @@ def test_capture_clip_nonzero_exit_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(audio_acquire.subprocess, "run", fail)
     with pytest.raises(audio_acquire.CaptureError):
         audio_acquire.capture_clip(source="s", source_type="usb_mic",
-                                   out_path=str(out), clip_seconds=5,
-                                   timeout_s=10, fmt="flac")
+                                   out_path=str(out), clip_seconds=5, fmt="flac")
 
 
 def test_capture_clip_bad_output_bytes_raises(tmp_path, monkeypatch):
@@ -151,5 +149,30 @@ def test_capture_clip_bad_output_bytes_raises(tmp_path, monkeypatch):
                         _fake_run_ok(str(out), b"JUNK"))
     with pytest.raises(audio_acquire.CaptureError):
         audio_acquire.capture_clip(source="s", source_type="usb_mic",
-                                   out_path=str(out), clip_seconds=5,
-                                   timeout_s=10, fmt="flac")
+                                   out_path=str(out), clip_seconds=5, fmt="flac")
+
+
+# --- timeout is derived from clip_seconds (Bug 1 fix) -----------------------
+
+def test_subprocess_timeout_exceeds_clip_length(tmp_path, monkeypatch):
+    # The subprocess timeout must ALWAYS be > clip_seconds, so a long clip is never
+    # killed before it completes. Capture the timeout ffmpeg is actually run with.
+    seen = {}
+    out = tmp_path / "c.flac"
+    def spy(cmd, **kw):
+        seen["timeout"] = kw.get("timeout")
+        with open(cmd[-1], "wb") as f:
+            f.write(b"fLaC" + b"\x00" * 40)
+        return audio_acquire.subprocess.CompletedProcess(cmd, 0, b"", b"")
+    monkeypatch.setattr(audio_acquire.subprocess, "run", spy)
+    audio_acquire.capture_clip(source="s", source_type="usb_mic",
+                               out_path=str(out), clip_seconds=60, fmt="flac")
+    assert seen["timeout"] > 60          # 60s clip is NOT killed at 10s anymore
+    assert seen["timeout"] == 60 + audio_acquire.DEFAULT_GRACE_S
+
+
+def test_capture_clip_rejects_nonpositive_grace(tmp_path):
+    with pytest.raises(ValueError):
+        audio_acquire.capture_clip(source="s", source_type="usb_mic",
+                                   out_path=str(tmp_path / "c.flac"),
+                                   clip_seconds=5, grace_s=0, fmt="flac")

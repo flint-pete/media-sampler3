@@ -128,8 +128,10 @@ def build_parser():
              'into the ring with a <clip>.json sidecar). Audio needs --audio-source.')
     parser.add_argument(
         '--audio-source', dest='audio_source', metavar='SRC', default=None,
-        help='AUDIO: the source to record from -- a URL (Reolink FLV / RTSP audio) '
-             'or an ALSA device (e.g. hw:1,0 with --source-type usb_mic).')
+        help='AUDIO: the source to record from -- an ALSA device (e.g. hw:1,0 with '
+             '--source-type usb_mic) or a credential-free URL (plain RTSP audio). '
+             'NOT needed for --source-type camera_mic, whose URL is built from '
+             '--camera-host + env CAMERA_USER/CAMERA_PASSWORD (no password on the CLI).')
     parser.add_argument(
         '--source-type', dest='source_type', default='usb_mic',
         choices=sorted(audio_metadata.SOURCE_TYPES),
@@ -329,7 +331,14 @@ def validate_args(args):
         ("--bandpass-fmax", getattr(args, "bandpass_fmax", None) is not None),
     ]
     if media == "audio":
-        if not getattr(args, "audio_source", None):
+        st = getattr(args, "source_type", "usb_mic")
+        if st == "camera_mic":
+            # camera mic builds its URL from --camera-host + ENV creds (no CLI
+            # password); --audio-source is not used for this source type.
+            if not getattr(args, "camera_host", None):
+                raise ConfigError("--source-type camera_mic requires --camera-host "
+                                  "(or env CAMERA_HOST)")
+        elif not getattr(args, "audio_source", None):
             raise ConfigError("--media audio requires --audio-source "
                               "(a URL or an ALSA device like hw:1,0)")
         cs = getattr(args, "clip_seconds", None)
@@ -515,6 +524,35 @@ def _one_shot_from_camera(args):
     return EXIT_OK
 
 
+def _resolve_audio_source(args):
+    """Resolve the effective audio source string for ffmpeg.
+
+    For --source-type camera_mic, build the Reolink FLV URL from --camera-host +
+    ENV-ONLY credentials (CAMERA_USER/CAMERA_PASSWORD), so the password NEVER
+    appears on the CLI or in process args (same rule the image path enforces). For
+    every other source type (usb_mic ALSA device, plain rtsp_audio/file), use
+    --audio-source verbatim. Raises ConfigError on missing host/creds for camera_mic.
+    """
+    if args.source_type == "camera_mic":
+        host = args.camera_host
+        if not host:
+            raise ConfigError("--source-type camera_mic requires --camera-host "
+                              "(or env CAMERA_HOST)")
+        user = os.environ.get("CAMERA_USER")
+        password = os.environ.get("CAMERA_PASSWORD")
+        if not user or password is None:
+            raise ConfigError("--source-type camera_mic needs CAMERA_USER and "
+                              "CAMERA_PASSWORD in the environment (credentials are "
+                              "never passed as flags)")
+        try:
+            return audio_acquire.build_reolink_flv_url(
+                host, args.camera_port, user, password, args.camera_channel)
+        except ValueError as e:
+            raise ConfigError(str(e))
+    # non-camera sources: the flag value is the source (no embedded credentials)
+    return args.audio_source
+
+
 def _resolve_camera_config(args):
     """Shared camera/identity resolution for continuous mode. Returns
     (url, ident, camera_name) or raises ConfigError on missing host/creds."""
@@ -639,7 +677,7 @@ def run_dual_grid_loop(*, capture_interval_s, do_capture, heartbeat, do_heartbea
             return iters
 
 
-def _audio_capture_to_tmp(*, source, source_type, clip_seconds, capture_timeout,
+def _audio_capture_to_tmp(*, source, source_type, clip_seconds, grace_s,
                           fmt, bandpass_fmax, vsn, node_id, job, task,
                           plugin_version, stream_label, lat, lon, dest_dir):
     """Capture one audio clip + build its sidecar, both staged as .tmp in dest_dir.
@@ -656,10 +694,12 @@ def _audio_capture_to_tmp(*, source, source_type, clip_seconds, capture_timeout,
                                                  fmt=fmt)
     clip_tmp = os.path.join(dest_dir, final_name + ".tmp")
 
-    # grab the clip straight into the .tmp (ffmpeg validates + cleans on failure)
+    # grab the clip straight into the .tmp (ffmpeg validates + cleans on failure).
+    # The subprocess timeout is clip_seconds + grace_s (computed inside capture_clip),
+    # so it can never be shorter than the clip itself.
     audio_acquire.capture_clip(
         source=source, source_type=source_type, out_path=clip_tmp,
-        clip_seconds=clip_seconds, timeout_s=capture_timeout, fmt=fmt,
+        clip_seconds=clip_seconds, grace_s=grace_s, fmt=fmt,
         bandpass_fmax=bandpass_fmax)
 
     raw = open(clip_tmp, "rb").read()
@@ -686,13 +726,21 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
     `max_ticks`/`plugin`/`monotonic`/`sleep` are injection points for tests.
     """
     is_audio = getattr(args, "media", "image") == "audio"
+    audio_source = None
     if is_audio:
-        # Audio needs identity + the stream label, but no camera URL/creds.
+        # Audio needs identity + the stream label, but no camera URL/creds unless
+        # the source is a camera mic (then build the FLV URL from ENV creds, so no
+        # password ever appears on the CLI / in process args -- same rule as images).
         ident = nodemeta.resolve_identity(
             vsn=args.vsn, node_id=args.node_id, lat=args.lat, lon=args.lon,
             manifest_path=args.node_manifest)
         camera_name = (args.name[0] if args.name else args.stream[0])
         url = None
+        try:
+            audio_source = _resolve_audio_source(args)
+        except ConfigError as e:
+            logger.error("config error: %s", e)
+            return EXIT_CONFIG_ERROR
     else:
         try:
             url, ident, camera_name = _resolve_camera_config(args)
@@ -754,10 +802,10 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
 
     def _tick_audio():
         """One audio tick: grab clip+sidecar, evict-plan, commit the pair.
-        Returns (written, evicted, final_name, final_bytes) or None on skip."""
+        Returns (res, cap)."""
         cap = _audio_capture_to_tmp(
-            source=args.audio_source, source_type=args.source_type,
-            clip_seconds=clip_secs, capture_timeout=args.capture_timeout,
+            source=audio_source, source_type=args.source_type,
+            clip_seconds=clip_secs, grace_s=audio_acquire.DEFAULT_GRACE_S,
             fmt=args.audio_format, bandpass_fmax=args.bandpass_fmax,
             vsn=ident["vsn"], node_id=ident["node_id"], job=args.job, task=args.task,
             plugin_version=args.plugin_version, stream_label=camera_name,

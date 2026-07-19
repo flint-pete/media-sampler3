@@ -88,8 +88,40 @@ def test_audio_flags_rejected_in_image_mode():
         app.validate_args(a)
 
 
-# --- audio capture helper (acquire mocked) ----------------------------------
+# --- audio source resolution: creds stay off the CLI (Bug 3 fix) ------------
 
+def test_resolve_audio_source_passthrough_for_usb_mic():
+    a = _parse(["--continuous", "10", "--stream", "m", "--cache-max-count", "1",
+                "--media", "audio", "--audio-source", "hw:1,0",
+                "--source-type", "usb_mic"])
+    assert app._resolve_audio_source(a) == "hw:1,0"
+
+
+def test_resolve_audio_source_camera_mic_builds_url_from_env(monkeypatch):
+    monkeypatch.setenv("CAMERA_USER", "sage")
+    monkeypatch.setenv("CAMERA_PASSWORD", "SEKRET42")
+    a = _parse(["--continuous", "10", "--stream", "cammic", "--cache-max-count", "1",
+                "--media", "audio", "--source-type", "camera_mic",
+                "--audio-source", "unused", "--camera-host", "10.0.0.9",
+                "--camera-port", "10000"])
+    url = app._resolve_audio_source(a)
+    # password comes from ENV, not the CLI -> present in the built URL, absent from args
+    assert "SEKRET42" in url
+    assert "10.0.0.9:10000" in url
+    assert "SEKRET42" not in " ".join(["--source-type", "camera_mic", "--audio-source", "unused"])
+
+
+def test_resolve_audio_source_camera_mic_requires_env_creds(monkeypatch):
+    monkeypatch.delenv("CAMERA_USER", raising=False)
+    monkeypatch.delenv("CAMERA_PASSWORD", raising=False)
+    a = _parse(["--continuous", "10", "--stream", "cammic", "--cache-max-count", "1",
+                "--media", "audio", "--source-type", "camera_mic",
+                "--audio-source", "x", "--camera-host", "h"])
+    with pytest.raises(app.ConfigError):
+        app._resolve_audio_source(a)
+
+
+# --- audio capture helper (acquire mocked) ----------------------------------
 def test_audio_capture_to_tmp_produces_clip_and_sidecar(tmp_path, monkeypatch):
     dest = str(tmp_path)
     ident = {"vsn": "H00F", "node_id": "abc", "lat": 41.7, "lon": -87.9}
@@ -103,7 +135,7 @@ def test_audio_capture_to_tmp_produces_clip_and_sidecar(tmp_path, monkeypatch):
 
     res = app._audio_capture_to_tmp(
         source="hw:1,0", source_type="usb_mic", clip_seconds=5,
-        capture_timeout=20, fmt="flac", bandpass_fmax=None,
+        grace_s=15, fmt="flac", bandpass_fmax=None,
         vsn=ident["vsn"], node_id=ident["node_id"], job="j", task="t",
         plugin_version="p:0.1.0", stream_label="usb_mic_0",
         lat=ident["lat"], lon=ident["lon"], dest_dir=dest)
@@ -126,7 +158,7 @@ def test_audio_capture_to_tmp_propagates_capture_error(tmp_path, monkeypatch):
     monkeypatch.setattr(app.audio_acquire, "capture_clip", boom)
     with pytest.raises(app.audio_acquire.CaptureError):
         app._audio_capture_to_tmp(
-            source="s", source_type="usb_mic", clip_seconds=5, capture_timeout=10,
+            source="s", source_type="usb_mic", clip_seconds=5, grace_s=15,
             fmt="flac", bandpass_fmax=None, vsn="H00F", node_id="a", job="j",
             task="t", plugin_version="p", stream_label="m", lat=None, lon=None,
             dest_dir=str(tmp_path))

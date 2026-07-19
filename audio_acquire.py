@@ -30,6 +30,13 @@ FLAC_MAGIC = b"fLaC"
 WAV_MAGIC_RIFF = b"RIFF"
 WAV_MAGIC_WAVE = b"WAVE"
 
+# Wall-clock grace added on top of clip_seconds for the ffmpeg subprocess timeout:
+# a clip of N seconds needs slightly MORE than N wall-clock seconds (connect,
+# encode/flush). The subprocess ceiling must therefore be clip_seconds + grace,
+# NEVER the image path's --capture-timeout (which bounds a still GET and would kill
+# any clip longer than it). Overridable by the caller for slow sources.
+DEFAULT_GRACE_S = 15.0
+
 
 class CaptureError(Exception):
     """Audio capture failed (ffmpeg missing/nonzero, unreachable, bad output)."""
@@ -102,21 +109,27 @@ def build_ffmpeg_cmd(*, source, source_type, out_path, clip_seconds, fmt="flac",
     return cmd
 
 
-def capture_clip(*, source, source_type, out_path, clip_seconds, timeout_s,
-                 fmt="flac", bandpass_fmax=None):
+def capture_clip(*, source, source_type, out_path, clip_seconds,
+                 grace_s=DEFAULT_GRACE_S, fmt="flac", bandpass_fmax=None):
     """Record one bounded clip via ffmpeg. Returns out_path.
 
-    Raises CaptureTimeout if ffmpeg overruns timeout_s (a hard wall > clip_seconds),
-    CaptureError on ffmpeg-missing / nonzero exit / non-<fmt> output. The output is
+    The subprocess wall-timeout is derived as clip_seconds + grace_s, so it is
+    ALWAYS safely larger than the clip itself (a clip of N seconds cannot be killed
+    before it finishes). grace_s covers connect + encode/flush overhead. Raises
+    CaptureTimeout only on a genuine overrun (source hung past clip+grace),
+    CaptureError on ffmpeg-missing / nonzero exit / non-<fmt> output. Output is
     validated by magic bytes so a 0-exit-but-garbage run is caught (fail-soft at the
     caller in continuous mode).
     """
-    if timeout_s is None or timeout_s <= 0:
-        raise ValueError("timeout_s must be a positive number")
+    if not isinstance(clip_seconds, (int, float)) or clip_seconds <= 0:
+        raise ValueError("clip_seconds must be a positive number")
+    if grace_s is None or grace_s <= 0:
+        raise ValueError("grace_s must be a positive number")
+    timeout_s = float(clip_seconds) + float(grace_s)
     cmd = build_ffmpeg_cmd(source=source, source_type=source_type,
                            out_path=out_path, clip_seconds=clip_seconds,
                            fmt=fmt, bandpass_fmax=bandpass_fmax)
-    logger.info("capturing %ss clip: %s (timeout %.1fs)",
+    logger.info("capturing %ss clip: %s (subprocess timeout %.1fs)",
                 clip_seconds, _redact(source), timeout_s)
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout_s)
@@ -135,15 +148,30 @@ def capture_clip(*, source, source_type, out_path, clip_seconds, timeout_s,
         raise CaptureError(f"ffmpeg exit {proc.returncode}: {err}")
 
     try:
-        head = open(out_path, "rb").read(16)
+        with open(out_path, "rb") as f:
+            head = f.read(16)
     except OSError as e:
         raise CaptureError(f"ffmpeg produced no readable output: {e}") from e
     ok = looks_like_flac(head) if fmt == "flac" else looks_like_wav(head)
     if not ok:
         _rm(out_path)
         raise CaptureError(f"ffmpeg output is not valid {fmt} (got {head[:8]!r})")
+    _fsync_file(out_path)   # durable before the caller renames it into the ring
     logger.info("captured clip: %s", out_path)
     return out_path
+
+
+def _fsync_file(path):
+    """fsync a closed file so its bytes are durable before an atomic rename
+    (symmetric with the image path's temp->fsync->rename). Best-effort."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 def _rm(path):

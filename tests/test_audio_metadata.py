@@ -144,3 +144,16 @@ def test_sidecar_is_world_readable(tmp_path):
 
 def test_sidecar_name_for_helper():
     assert audio_metadata.sidecar_name_for("/x/c.flac") == "/x/c.flac.json"
+
+
+def test_sidecar_utf8_readable_not_escaped(tmp_path):
+    # Non-ASCII labels are written as readable UTF-8, not \\uXXXX escapes.
+    clip = tmp_path / "c.flac"
+    clip.write_bytes(RAW)
+    d = _field_dict(source="mic")
+    d["job"] = "caf\u00e9-monitor"
+    sidecar = audio_metadata.write_sidecar(str(clip), d)
+    text = open(sidecar, encoding="utf-8").read()
+    assert "caf\u00e9-monitor" in text          # literal é, not \\u00e9
+    assert "\\u00e9" not in text
+    assert json.loads(text)["job"] == "caf\u00e9-monitor"

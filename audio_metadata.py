@@ -71,9 +71,11 @@ def sidecar_name_for(clip_path):
 
 def write_sidecar(clip_path, field_dict):
     """Write field_dict as the clip's sidecar JSON (0644, world-readable for
-    cross-user cache reads). Returns the sidecar path."""
+    cross-user cache reads). Human-readable UTF-8 (non-ASCII labels kept as-is,
+    not \\uXXXX-escaped). Returns the sidecar path."""
     sidecar = sidecar_name_for(clip_path)
-    blob = json.dumps(field_dict, separators=(",", ":"), sort_keys=True).encode("ascii")
+    blob = json.dumps(field_dict, separators=(",", ":"), sort_keys=True,
+                      ensure_ascii=False).encode("utf-8")
     fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     try:
         os.write(fd, blob)
