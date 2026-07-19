@@ -21,9 +21,10 @@
 # your scheduler version — see Infra #10; if envFrom is unsupported, use pluginctl
 # --env-from for node-local testing.)
 #
-# CACHE LOCATION: --cache-root defaults to /local-cache (falls back to /tmp when
-# absent). For a persistent, cross-consumer-readable cache the CI team is expected
-# to provide a node-persistent /local-cache mount (§2.12, Infra deferred 4.2).
+# CACHE LOCATION: --cache-root defaults to /local-cache. If that mount is absent
+# the plugin FAILS FAST with an explanation — there is NO silent fallback (a cache
+# no consumer can read is worse than a clear error). The CI team provides the
+# node-persistent /local-cache mount (§2.12) via wes-local-cache-manager.
 #
 # Submit (with a write-scoped token):
 #   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/producer-continuous.yaml
@@ -48,7 +49,7 @@ plugins:
         - "--heartbeat-secs"
         - "60"                       # liveness beat every 60s (§3.2)
         - "--camera-host"
-        - "10.107.0.221"
+        - "CAMERA_IP_HERE"           # set to your camera's LAN IP (no secrets in git)
         - "--camera-port"
         - "10000"
         - "--job"

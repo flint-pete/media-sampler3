@@ -1,178 +1,203 @@
 # media-sampler3
 
-`media-sampler3` samples still images from a camera stream. It is an enhanced fork
-of the Sage/Waggle `mediasampler`, redesigned around a **producer/consumer** model:
-the sampler is a cheap, CPU-only **producer** that either uploads a single frame or
-maintains a bounded local **ring cache** that other plugins (inference, triggered
-uploaders) consume on their own schedule.
+`media-sampler3` is a versatile **media producer** for Sage/Waggle edge nodes. It
+captures **still images** (JPEG) from cameras and **audio clips** (FLAC/WAV) from
+microphones, and either uploads a single sample to the cloud or maintains a
+bounded local **ring cache** that other plugins (inference, triggered uploaders)
+consume on their own schedule.
 
-Collecting still images is one of the fundamental ways to gather training data and
-to show the visual context in which an inference was made.
+It is an enhanced fork of the Sage/Waggle `imagesampler`, redesigned around a
+**producer/consumer** model and generalized from images-only to a multi-media
+producer. The producer is cheap and CPU-only; a companion consumer plugin does the
+heavy work (e.g. BirdNET on audio clips, a detector on image frames).
 
-> Status: under staged implementation. **Stages 0-3 shipped**: the CLI contract +
-> fail-fast validation (Stage 0), single real capture (Stage 1), capture-time v2
-> naming + self-describing EXIF/JSON embed (Stage 2), and the one-shot upload path
-> to Beehive with fleet-portable node identity (Stage 3). The `--continuous` ring
-> cache and the heartbeat land in later stages. Full design:
-> `docs/mediasampler.flint.analysis.txt`.
+Collecting images and audio is a fundamental way to gather training data and to
+capture the sensory context in which an inference was made — a bird detected in a
+clip, an object seen in a frame.
+
+> Status: **v0.1.0.** The image path is shipped and verified end-to-end on a live
+> node (H00F). The audio path is code-complete and unit-verified; on-node hardware
+> validation is the remaining step. 232 tests passing. Full audio design:
+> `docs/AUDIO-EXTENSION-DESIGN.md`.
+
+---
+
+## The self-describing v2 cache-frame
+
+Every captured artifact is named at capture time and carries its own complete
+provenance, so a consumer needs no external database:
+
+```
+<capture_ts_ns>-v2-<vsn>-<source>.<ext>       # .jpg | .flac | .wav
+```
+
+- **Images** embed the full field set as **EXIF** inside the JPEG (standard tags +
+  a JSON blob in `UserComment`; SHA-256 in `ImageUniqueID`), with no pixel
+  re-encode.
+- **Audio** carries the same field set in a **sidecar JSON** (`<clip>.json`) next
+  to the clip, because audio has no EXIF. One logical frame = clip + sidecar; the
+  ring counts/evicts by the clip and writes the sidecar first so a consumer that
+  sees a clip always finds its metadata.
+
+Audio frames add `media_type`, `source` (the stream label), and `source_type`
+(`camera_still | camera_mic | usb_mic | rtsp_audio | file`) to the shared field
+set; `camera` is retained as an alias of `source` for legacy image consumers.
 
 ---
 
 ## Modes (exactly one is required)
 
-`media-sampler3` runs in **one** of two mutually-exclusive modes. You must pass
-exactly one; passing both, or neither, is a fail-fast error.
-
 | Mode | What it does |
 |------|--------------|
-| `--one-shot` | Capture **one** frame, queue it for cloud upload, exit. Upload-only — never writes to the cache. Cadence is external (the scheduler relaunches the pod). Best for "grab one now" and periodic cloud snapshots. |
-| `--continuous SECONDS` | Run forever, capturing on a fixed period of `SECONDS`. **Local-only** — writes each frame into the ring cache and **never uploads**. This is the producer that fills the shared cache for consumers. |
+| `--one-shot` | Capture **one** frame, queue it for cloud upload, exit. Upload-only — never writes the cache. Cadence is external (the scheduler relaunches the pod). |
+| `--continuous SECONDS` | Run forever, capturing every `SECONDS`. **Local-only** — writes each frame into the ring cache and **never uploads**. This is the producer that fills the shared cache. |
 
 ---
 
 ## Command-line flags
 
-### Mode (required, choose one)
+### Media type
 
-- **`--one-shot`**
-  Capture exactly one frame, queue it for cloud upload, then exit `0`.
-  Upload-only: it does **not** write to `--cache-dir`. Combine with `--from-cache`
-  to upload a cached frame instead of hitting the camera.
+- **`--media {image,audio}`** — media to capture. Default `image` (fully
+  back-compatible with imagesampler). One media type per process.
 
-- **`--continuous SECONDS`**
-  Run forever, capturing on a **fixed period** of `SECONDS` (must be a positive
-  integer). Local-only: writes into the ring cache and never uploads. Requires
-  `--cache-dir`, `--cache-name`, and at least one cache cap.
+### Audio (with `--media audio`)
+
+- **`--audio-source SRC`** — an ALSA device (`hw:1,0`) or a credential-free URL
+  (plain RTSP audio). **Not** required for `--source-type camera_mic`, whose URL is
+  built internally from `--camera-host` + env credentials (no password on the CLI).
+- **`--source-type TYPE`** — `camera_still | camera_mic | usb_mic | rtsp_audio |
+  file`. Drives the ffmpeg input mode and is recorded in the sidecar. Default
+  `usb_mic`.
+- **`--clip-seconds N`** — clip duration. Defaults to the `--continuous` period so
+  clips tile the timeline with no gaps.
+- **`--audio-format {flac,wav}`** — container/codec. Default `flac` (lossless,
+  smaller than WAV).
+- **`--bandpass-fmax HZ`** — apply a lowpass at `HZ` (Nyquist guard for
+  bandwidth-limited mics, e.g. `8000` for a 16 kHz camera mic). Omit for none.
+
+> The audio capture subprocess timeout is derived automatically as
+> `clip_seconds + 15s`, so a long clip is never killed before it finishes.
+> `--capture-timeout` bounds the **image** still-fetch only.
 
 ### Source
 
-- **`--stream STREAM`** *(required, repeatable)*
-  A named camera stream (e.g. `top_camera`, `bottom_camera`) or a raw URL
-  (`rtsp://IP:PORT/...`). Repeat `--stream` to sample multiple streams; each runs
-  in its own worker process. At least one is required.
+- **`--stream STREAM`** *(required)* — a stream label: a camera name for images, a
+  mic label for audio (e.g. `top_camera`, `north_mic`). In `--continuous`, exactly
+  one stream per process (run a separate job per stream).
+- **`--name NAME`** *(optional)* — display label reported for the stream; defaults
+  to the stream id. If given in a multi-stream one-shot, count must match `--stream`.
+- **`--from-cache DIR`** *(one-shot only)* — upload the **newest** frame already in
+  cache directory `DIR` instead of hitting the source. The composable "periodic
+  uploader": pair a continuous producer with a scheduled `--one-shot --from-cache`.
 
-- **`--name NAME`** *(optional, repeatable)*
-  Human label to report for a stream. If given, the number and order of `--name`
-  values **must match** the `--stream` values. If omitted, the stream id is used
-  as the name.
+### Camera connection (image, and `camera_mic` audio)
 
-- **`--from-cache DIR`** *(one-shot only)*
-  Instead of hitting the camera, upload the **newest** image already present in
-  the cache directory `DIR` (populated by a `--continuous` producer). Does not
-  touch the camera, does not write, does not evict. This is the composable
-  "periodic uploader": pair a continuous producer with a scheduled
-  `--one-shot --from-cache` uploader. Only valid with `--one-shot`.
+The camera address may be a flag or environment variable. **Credentials are
+environment-only** (`CAMERA_USER` / `CAMERA_PASSWORD`) — never flags — so they do
+not appear in process arguments, shell history, or logs (redacted in log output).
 
-### Camera connection (native-still fetch)
-
-The camera address may be given by flag or environment variable. **Credentials
-are environment-only** (`CAMERA_USER` / `CAMERA_PASSWORD`) and are never accepted
-as flags, so they do not appear in process arguments, shell history, or logs (the
-password is redacted in log output).
-
-- **`--camera-host HOST`** — camera IP/host for the native-still fetch. Defaults to
-  env `CAMERA_HOST`. Required for a from-camera capture.
-- **`--camera-port PORT`** — camera HTTP port (default env `CAMERA_PORT` or `80`).
+- **`--camera-host HOST`** — camera IP/host (default env `CAMERA_HOST`).
+- **`--camera-port PORT`** — camera HTTP port (default env `CAMERA_PORT` or `80`;
+  Reolink is typically `10000`).
 - **`--camera-channel N`** — camera channel (default env `CAMERA_CHANNEL` or `0`).
-- **`--capture-timeout SECONDS`** — hard timeout for a single capture (default `10`).
+- **`--capture-timeout SECONDS`** — hard timeout for a single **image** still-fetch
+  (default `10`). Does not apply to audio.
 - **`CAMERA_USER` / `CAMERA_PASSWORD`** *(environment only)* — camera credentials.
-
-### Node / provenance identity
-
-Embedded into the EXIF and attached to the upload meta. On a real Sage node these
-are read automatically from `/etc/waggle/node-manifest-v2.json` (and the
-`/etc/waggle/vsn` / `node-id` files) — so the plugin self-identifies on any node
-with no per-node configuration. The flags below OVERRIDE the manifest.
-
-- **`--vsn VSN`** — node VSN (e.g. `H00F`). Overrides the manifest. Used in the v2
-  filename and EXIF. Fatal if it cannot be resolved (flag or manifest).
-- **`--node-id ID`** — node hardware id. Overrides manifest `.name` / `/etc/waggle/node-id`.
-- **`--lat DEG` / `--lon DEG`** — node latitude/longitude (decimal degrees).
-  Override manifest `.gps_lat` / `.gps_lon`. Omitted from EXIF GPS if unresolved;
-  negative values stored correctly (absolute value + N/S/E/W ref).
-- **`--node-manifest PATH`** — path to the node manifest JSON (default env
-  `WAGGLE_NODE_MANIFEST` or `/etc/waggle/node-manifest-v2.json`). For testing / off-node use.
-- **`--job NAME`** — job name for provenance. Default env `WAGGLE_JOB_NAME` or `sage`.
-- **`--task NAME`** — task name. Default env `WAGGLE_TASK_NAME` or `media-sampler3`.
-- **`--plugin-version REF`** — plugin image `ref:version` recorded in EXIF/meta.
 
 ### Ring cache (continuous only)
 
-- **`--cache-dir DIR`** *(required with `--continuous`)*
-  Directory that holds the per-stream ring cache. Must already exist and be
-  writable (fail-fast otherwise). Each stream writes into its own subdirectory
-  `DIR/<camera>/`.
+- **`--cache-root DIR`** — base dir for the ring. **Optional**: defaults to
+  `$IS2_CACHE_ROOT` → `/local-cache` (the shared node cache from
+  `wes-local-cache-manager`). Must already exist and be writable, else fail-fast.
+  The per-stream ring lives at `DIR/<cache-name>/<source>/`.
+- **`--cache-name NAME`** — filesystem-safe id for this cache instance (defaults to
+  the job id), so consumers can find it and two configs on one source don't
+  collide. Allowed: letters, digits, `.`, `-`, `_`. No path separators/whitespace.
+- **`--cache-max-count N`** — max frames kept **per stream** (evict oldest first).
+- **`--cache-max-mb MB`** — max total per-stream size in decimal MB (10^6 bytes;
+  for audio, includes the sidecar bytes). Evict oldest first.
 
-- **`--cache-name NAME`** *(required with `--continuous`)*
-  Stable, filesystem-safe identifier for this cache instance, so consumer plugins
-  can find it and two different configurations on the same camera do not collide.
-  Allowed characters: letters, digits, dot (`.`), dash (`-`), underscore (`_`).
-  No path separators or whitespace.
+  Set one or both caps; eviction fires when **either** would be exceeded. At least
+  one is REQUIRED with `--continuous` (an unbounded cache is not allowed).
 
-- **`--cache-max-count N`** *(continuous; at least one cap required)*
-  Maximum number of images kept **per stream** in the ring. When exceeded, the
-  oldest images are evicted first.
+- **`--heartbeat-secs S`** — liveness-heartbeat cadence (default `60`), independent
+  of the capture interval. Continuous mode is local-only, so the heartbeat is the
+  sole liveness signal; it publishes `env.mediasampler.cache.*` stats.
+- **`--max-count N` / `--max-runtime S`** — clean self-exit bounds (0 = unbounded)
+  for windowed / GPU-time-shared scheduling; exit is a success.
 
-- **`--cache-max-mb MB`** *(continuous; at least one cap required)*
-  Maximum total size of the per-stream ring, in decimal megabytes (10^6 bytes).
-  When exceeded, the oldest images are evicted first.
+### Node / provenance identity
 
-  You may set one or both caps; eviction triggers when **either** would be
-  exceeded. At least one cap is required with `--continuous` — an unbounded cache
-  is not allowed.
+Embedded in the image EXIF / audio sidecar and attached to upload meta. Resolved at
+runtime from the WES-injected `WAGGLE_NODE_*` env vars (with the node manifest as an
+off-node fallback), so the plugin self-identifies with no per-node config. The flags
+below OVERRIDE. Identity is never fatal — Beehive attributes the node via routing.
+
+- **`--vsn VSN`** — node VSN (e.g. `H00F`); shapes the v2 filename.
+- **`--node-id ID`** — node hardware id.
+- **`--lat DEG` / `--lon DEG`** — coordinates (decimal degrees); omitted if
+  unresolved; negatives stored correctly (absolute value + N/S/E/W ref).
+- **`--node-manifest PATH`** — manifest JSON path (default env `WAGGLE_NODE_MANIFEST`
+  or `/etc/waggle/node-manifest-v2.json`). For testing / off-node use.
+- **`--job NAME`** — provenance job name (default env `WAGGLE_JOB_NAME` or `sage`).
+- **`--task NAME`** — task name (default env `WAGGLE_TASK_NAME` or `media-sampler3`).
+- **`--plugin-version REF`** — plugin image `ref:version` recorded in provenance.
 
 ---
 
 ## Fail-fast rules
 
-Invalid flag combinations are rejected **before any work** with a clear message and
-a nonzero exit code (config errors exit `2`):
+Invalid flag combinations are rejected **before any work**, with a clear message
+and a config-error exit code (`2`):
 
 - Not exactly one mode (`--one-shot` XOR `--continuous`).
 - `--continuous SECONDS` not a positive integer.
-- No `--stream` given.
+- No `--stream`; or more than one `--stream` in `--continuous`.
 - `--name` count does not match `--stream` count.
-- Cache flags (`--cache-dir`, `--cache-name`, `--cache-max-count`, `--cache-max-mb`)
-  used with `--one-shot` (they are continuous-only).
-- `--from-cache` used with `--continuous` (it is one-shot-only).
-- `--continuous` without `--cache-dir`, without `--cache-name`, or with no cap.
-- `--cache-dir` does not exist or is not writable.
-- `--cache-name` contains illegal characters (path separators, spaces, etc.).
-- A cache cap set to a non-positive value.
+- `--media audio` without an audio source (`--audio-source`, or `--camera-host`
+  for `camera_mic`); non-positive `--clip-seconds`.
+- Audio flags used with `--media image`.
+- Cache flags used with `--one-shot`; `--from-cache` used with `--continuous`.
+- `--continuous` with no cache cap; cache root missing/unwritable; illegal
+  `--cache-name`; non-positive cap.
 
 ---
 
 ## Usage examples
 
-Capture one image and upload it:
+Continuous audio from a USB mic (10 s FLAC clips, keep newest 500 or 2 GB):
 
 ```bash
-python3 app.py --one-shot --stream top_camera
+media-sampler3 --continuous 10 \
+  --media audio --audio-source hw:1,0 --source-type usb_mic \
+  --stream north_mic \
+  --cache-max-count 500 --cache-max-mb 2000
 ```
 
-Capture one image from each of two streams, with labels:
+Continuous audio from a camera mic (creds from env, 8 kHz lowpass):
 
 ```bash
-python3 app.py --one-shot \
-  --stream bottom_camera --name street \
-  --stream top_camera    --name sky
+export CAMERA_USER=... CAMERA_PASSWORD=...
+media-sampler3 --continuous 30 \
+  --media audio --source-type camera_mic \
+  --camera-host 10.x.x.x --camera-port 10000 --bandpass-fmax 8000 \
+  --stream top_camera_mic --cache-max-mb 5000
 ```
 
-Run a continuous producer that keeps the last 500 images (or 1 GB) per stream:
+Continuous images (keep newest 500 or 1 GB per stream):
 
 ```bash
-python3 app.py --continuous 60 \
-  --stream top_camera \
-  --cache-dir /run/waggle/cache \
-  --cache-name hummingcam \
-  --cache-max-count 500 \
-  --cache-max-mb 1000
+export CAMERA_USER=... CAMERA_PASSWORD=...
+media-sampler3 --continuous 60 \
+  --stream top_camera --camera-host 10.x.x.x \
+  --cache-max-count 500 --cache-max-mb 1000
 ```
 
-Periodically upload the newest cached frame (the composition pattern — pair with a
-continuous producer, schedule this on a cron cadence):
+Periodically upload the newest cached image (composition pattern — pair with a
+continuous producer, schedule on a cron cadence):
 
 ```bash
-python3 app.py --one-shot --stream top_camera \
-  --from-cache /run/waggle/cache/hummingcam/top_camera
+media-sampler3 --one-shot --stream top_camera \
+  --from-cache /local-cache/hummingcam/top_camera
 ```

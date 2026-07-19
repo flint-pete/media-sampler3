@@ -13,6 +13,26 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 
 ## [Unreleased]
 
+### Fixed
+- **Audio review fixes (pre-deployment code review).** (1) The ffmpeg subprocess
+  timeout is now derived as `clip_seconds + 15s` inside `capture_clip`, instead of
+  reusing the image `--capture-timeout` (default 10s) — which had silently killed
+  every clip when the interval was ≥ ~8s. (2) `--source-type camera_mic` now builds
+  its Reolink FLV URL internally from `--camera-host` + env `CAMERA_USER`/
+  `CAMERA_PASSWORD` (new `_resolve_audio_source`), so a camera password never rides
+  on the CLI / in process args; `--audio-source` is reserved for credential-free
+  sources. (3) Sidecar JSON is written as human-readable UTF-8 (`ensure_ascii=
+  False`). (4) The ffmpeg-written clip is fsync'd before the ring rename (symmetric
+  with the image temp→fsync→rename durability).
+
+### Changed
+- **Documentation pass.** README, `ecr-meta/ecr-science-description.md`, and
+  `jobs/README.md` rewritten for the image+audio producer: corrected stale flag
+  names (`--cache-dir` → `--cache-root`), documented all audio flags and the v2
+  cache-frame / sidecar contract, and refreshed status to v0.1.0. Added
+  `jobs/producer-audio-continuous.yaml`. Scrubbed the inherited real camera LAN IP
+  from the example job manifest (now a `CAMERA_IP_HERE` placeholder).
+
 ### Added
 - **Audio producer wired end-to-end (`--media audio`).** The continuous producer
   now captures FLAC/WAV clips into the same ring as JPEG frames, each with a

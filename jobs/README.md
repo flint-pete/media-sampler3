@@ -1,12 +1,16 @@
-# media-sampler3 example jobs — the periodic-snapshot pattern
+# media-sampler3 example jobs
 
-These two jobs implement the recommended way to get **periodic cloud snapshots**
-from a camera on a Sage node, using the producer/consumer split (design §2.1/§2.8).
+Ready-to-run job manifests for the producer/consumer split (design §2.1/§2.8).
 
 | Job | Mode | Role |
 |-----|------|------|
-| `producer-continuous.yaml` | `--continuous` | Fills a local ring cache. **Never uploads.** |
-| `uploader-from-cache.yaml` | `--one-shot --from-cache` | Uploads the **newest** cached frame on a cron. **Never touches the camera.** |
+| `producer-continuous.yaml` | `--continuous` (image) | Fills a local ring cache with JPEG frames. **Never uploads.** |
+| `producer-audio-continuous.yaml` | `--continuous --media audio` | Fills a local ring cache with FLAC clips + sidecars. **Never uploads.** |
+| `uploader-from-cache.yaml` | `--one-shot --from-cache` | Uploads the **newest** cached frame on a cron. **Never touches the source.** |
+
+Each producer captures one stream per process (one camera OR one mic); run a
+separate job per stream. Edit the placeholders (`CAMERA_IP_HERE`, the ALSA device
+`hw:1,0`, `--cache-name`, `--stream`) before submitting.
 
 ## Why two jobs instead of one
 
@@ -26,10 +30,11 @@ them means:
 The uploader's `--from-cache` points at the producer's **stream dir**:
 
 ```
-<cache-root>/<cache-name>/<camera>/   ==   /local-cache/hummingcam/top
+<cache-root>/<cache-name>/<source>/   ==   /local-cache/hummingcam/top
 ```
 
-so the two jobs must agree on `--cache-root`, `--cache-name`, and `--stream`.
+so the two jobs must agree on `--cache-root`, `--cache-name`, and `--stream`
+(`<source>` is the `--stream` label).
 
 ## Credentials (producer only)
 

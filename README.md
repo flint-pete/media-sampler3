@@ -1,65 +1,173 @@
 # media-sampler3
 
-An enhanced fork of the Sage/Waggle **mediasampler** plugin
-(`waggle-sensor/plugin-mediasampler`, portal: `yonghokim/mediasampler`).
+A versatile media **producer** for Sage/Waggle edge nodes. It captures **JPEG
+still images** and **audio clips** from a node's cameras and microphones and
+either uploads them to the cloud or maintains a bounded local **ring cache** that
+other plugins (inference, triggered uploaders) consume on their own schedule.
+
+Enhanced fork of the Sage/Waggle **imagesampler** plugin
+(`waggle-sensor/plugin-imagesampler`), generalized from images-only to a
+multi-media producer built around one self-describing **v2 cache-frame contract**.
 
 ## Status
 
-**v0.5.1 — Stages 0-6 + 3.3 shipped and verified end-to-end on H00F.** 229 tests
-passing. Implemented: CLI contract + fail-fast validation (S0), single real
-capture (S1), capture-time v2 naming + self-describing EXIF/JSON embed (S2),
-one-shot upload to Beehive with placeholder node identity (S3, full round-trip
-confirmed), `--continuous` ring cache (S4), cache heartbeat/liveness (S5),
-`--from-cache` uploader (S6), and self-exit bounds `--max-count`/`--max-runtime`
-for GPU time-sharing (S3.3). 0.5.1 also modernized the container
-(`python:3.12-slim`, slimmed deps). Full design:
-`docs/mediasampler.flint.analysis.txt`.
+**v0.1.0 — image path shipped & verified on H00F; audio path code-complete.**
+232 tests passing (8 hardware-gated integration tests skip offline).
+
+- **Image capture** (inherited from imagesampler v0.5.1, fully proven): single
+  real capture, capture-time v2 naming + self-describing EXIF/JSON embed, one-shot
+  upload to Beehive, `--continuous` ring cache, cache heartbeat/liveness,
+  `--from-cache` uploader, and self-exit bounds for GPU time-sharing.
+- **Audio capture** (new in media-sampler3): bounded FLAC/WAV clips captured via
+  ffmpeg into the same ring, each with a `<clip>.json` metadata sidecar. Wired
+  end-to-end and unit-verified; **on-node hardware validation is the remaining
+  step** (see `readiness-gap.txt`).
 
 The producer/consumer loop uses the shared `/local-cache` node cache provided by
 the `wes-local-cache-manager` WES component; if that mount is absent the plugin
 **fails fast** rather than writing to an ephemeral path no consumer can read.
-Remaining platform gaps: normal ECR deployment is blocked by the build bug, and
-real node identity/geotags await the pywaggle/WES runtime calls. See
-`readiness-gap.txt`.
 
-> **Platform blockers** (outside this plugin) are tracked with issue-ready
-> writeups in `~/AI-projects/sage-design-planning/Infra-problems-to-fix.md` (ECR `/proc/acpi` build
-> bug -> filed waggle-edge-stack#110; arm64/Thor build; side-load path; runtime
-> GPS/VSN; shared cache mount).
->
-> **Future work INSIDE this plugin** (multi-vendor cameras, OpenCV fallback,
-> resize/quality decision, from-cache selectors, real-identity wiring, cross-user
-> cache perms) is tracked in `~/AI-projects/sage-design-planning/plugin-improvements.md` (IS-1..IS-7)
-> and summarized in `readiness-gap.txt`.
+Full audio design: `docs/AUDIO-EXTENSION-DESIGN.md`. Original code study:
+`docs/mediasampler.analysis.txt`.
+
+## Core concepts
+
+**Media type.** The producer captures one media type per process, selected with
+`--media {image,audio}` (default `image`, fully back-compatible). One plugin
+instance = one stream (one camera OR one mic); run a separate job per stream.
+
+**The v2 cache-frame contract.** Every captured artifact is *self-describing* and
+named at capture time:
+
+```
+<capture_ts_ns>-v2-<vsn>-<source>.<ext>
+```
+
+- `capture_ts_ns` — node wall-clock nanoseconds at capture (orders the ring, no
+  `stat` needed).
+- `vsn` — the node's VSN (e.g. `H00F`).
+- `source` — the stream label (a camera name for images, a mic label for audio).
+- `<ext>` — `.jpg` (image), `.flac` / `.wav` (audio).
+
+**How provenance travels with the artifact** — the whole field set (schema,
+identity, job/task, timestamps, GPS, a SHA-256 of the original bytes, etc.) is
+carried *with* every frame so a downstream consumer needs no external database:
+
+| Media | Carrier | Detail |
+|-------|---------|--------|
+| Image | **EXIF**, in the JPEG itself | standard tags + a full JSON blob in `UserComment`; `unique_id` in `ImageUniqueID`. No pixel re-encode. |
+| Audio | **Sidecar JSON**, `<clip>.json` next to the clip | same field set (audio has no EXIF). Format-agnostic; readable by any JSON parser. |
+
+For audio, one logical frame = **clip + its sidecar**. The ring counts and evicts
+by the clip; on write it publishes the **sidecar first, then the clip**, so a
+consumer that sees a clip is guaranteed its sidecar already exists.
+
+**Audio source fields.** A mic is not a camera, so audio frames carry:
+`media_type` (`image`/`audio`), `source` (the stream label), and `source_type`
+(`camera_still | camera_mic | usb_mic | rtsp_audio | file`). `camera` is retained
+as an alias of `source` so legacy image consumers keep working unchanged.
+
+## Modes (exactly one is required)
+
+| Mode | What it does |
+|------|--------------|
+| `--one-shot` | Capture **one** frame, queue it for cloud upload, exit. Upload-only — never writes the cache. Cadence is external (the scheduler relaunches the pod). |
+| `--continuous SECONDS` | Run forever, capturing every `SECONDS`. **Local-only** — writes each frame into the ring cache and **never uploads**. This is the producer that fills the shared cache. |
+
+## Quick start
+
+**Continuous audio from a USB microphone** (10-second FLAC clips, keep the newest
+500 or 2 GB, whichever comes first):
+
+```bash
+media-sampler3 --continuous 10 \
+  --media audio --audio-source hw:1,0 --source-type usb_mic \
+  --stream north_mic \
+  --cache-max-count 500 --cache-max-mb 2000
+```
+
+**Continuous audio from a camera microphone** (credentials from the environment,
+never on the command line — a bandwidth-limited 16 kHz mic gets an 8 kHz lowpass):
+
+```bash
+export CAMERA_USER=... CAMERA_PASSWORD=...
+media-sampler3 --continuous 30 \
+  --media audio --source-type camera_mic \
+  --camera-host 10.x.x.x --camera-port 10000 \
+  --bandpass-fmax 8000 \
+  --stream top_camera_mic \
+  --cache-max-mb 5000
+```
+
+**Continuous images** (unchanged from imagesampler):
+
+```bash
+export CAMERA_USER=... CAMERA_PASSWORD=...
+media-sampler3 --continuous 60 \
+  --stream top_camera --camera-host 10.x.x.x \
+  --cache-max-count 1000
+```
+
+## Flags
+
+### Media & audio
+
+| Flag | Applies to | Meaning |
+|------|-----------|---------|
+| `--media {image,audio}` | both | Media type to capture. Default `image`. |
+| `--audio-source SRC` | audio | ALSA device (`hw:1,0`) or a credential-free URL (plain RTSP). **Not** needed for `--source-type camera_mic` (its URL is built from `--camera-host` + env creds). |
+| `--source-type TYPE` | audio | `camera_still \| camera_mic \| usb_mic \| rtsp_audio \| file`. Drives the ffmpeg input mode and is recorded in the sidecar. Default `usb_mic`. |
+| `--clip-seconds N` | audio | Clip duration. Defaults to the `--continuous` period, so clips tile the timeline with no gaps. |
+| `--audio-format {flac,wav}` | audio | Container/codec. Default `flac` (lossless, smaller). |
+| `--bandpass-fmax HZ` | audio | Apply a lowpass at `HZ` (Nyquist guard for bandwidth-limited mics, e.g. `8000` for a 16 kHz camera mic). Omit for none. |
+
+> **Audio timeout is automatic.** The ffmpeg subprocess ceiling is derived as
+> `clip_seconds + 15s` of grace, so a long clip is never killed before it
+> finishes. `--capture-timeout` governs the **image** still-fetch only.
+
+### Source & cache (shared)
+
+| Flag | Meaning |
+|------|---------|
+| `--stream ID` | Stream label (camera name or mic label). REQUIRED. In `--continuous`, exactly one. |
+| `--name LABEL` | Optional display label reported for a stream (defaults to the stream id). |
+| `--cache-root DIR` | Ring base dir. Defaults to `$IS2_CACHE_ROOT` → `/local-cache`. Must already exist & be writable, else fail-fast. |
+| `--cache-name NAME` | Filesystem-safe cache-instance id (defaults to the job id). |
+| `--cache-max-count N` / `--cache-max-mb MB` | Ring caps (evict oldest first). At least one is REQUIRED with `--continuous`. |
+| `--heartbeat-secs S` | Liveness-heartbeat cadence (default 60), independent of the capture interval. |
+| `--max-count N` / `--max-runtime S` | Clean self-exit bounds for windowed/GPU-shared scheduling (0 = unbounded). |
+
+### Camera connection (image, and `camera_mic` audio)
+
+`--camera-host` / `--camera-port` / `--camera-channel` / `--capture-timeout`.
+**Credentials are environment-only** (`CAMERA_USER` / `CAMERA_PASSWORD`) — never
+a flag, so no password appears in `ps`, shell history, or the pod spec.
+
+### Node identity / provenance
+
+`--vsn` / `--node-id` / `--job` / `--task` / `--plugin-version` / `--lat` /
+`--lon` / `--node-manifest`. Identity is resolved at runtime from the WES-injected
+`WAGGLE_NODE_*` env vars; these flags override. Identity is never fatal — Beehive
+attributes the node via routing regardless.
 
 ## Provenance of the baseline
 
-- Upstream: https://github.com/waggle-sensor/plugin-mediasampler (branch `main`)
-- Upstream version at copy time: **0.3.8** (see `sage.yaml`)
-- All 12 upstream files copied faithfully (text files sha256-verified against
-  upstream; binary `ecr-meta/*.jpg` byte-sizes verified).
-- Copied on: 2026-07-03.
+- Upstream: https://github.com/waggle-sensor/plugin-imagesampler
+- Forked from the enhanced `image-sampler2` at **v0.5.1** on 2026-07-15, then
+  generalized to media-sampler3 (image + audio). See `CHANGELOG.md` for the full
+  fork + rename record.
 
-## What's added on top of the baseline
+## Documentation
 
-- `docs/mediasampler.flint.analysis.txt` — full code study of the upstream
-  plugin: camera source, sample frequency, when/how images are saved,
-  shortcomings, upgrade options, the pywaggle `{timestamp}-{filename}` naming
-  mechanism, upload metadata (what pywaggle vs the server adds), the
-  two-timestamp (capture + upload) design, and verified RTSP `sample.timestamp`
-  semantics.
-
-## Next steps
-
-See `readiness-gap.txt` for what's left to be usable and
-`~/AI-projects/sage-design-planning/plugin-improvements.md` (IS-1..IS-7) for the plugin-side backlog.
-The near-term in-our-control items are the cross-user cache permission probe
-(once a shared mount exists) and Hanwha SUNAPI camera support (once hardware is
-reachable).
+- `docs/AUDIO-EXTENSION-DESIGN.md` — the audio-producer design and locked decisions.
+- `docs/mediasampler.analysis.txt` — the original upstream code study.
+- `docs/IMPLEMENTATION-PLAN.md`, `docs/STAGE*-DESIGN-NOTE.md` — staged design notes.
+- `readiness-gap.txt` — what remains before deployment (on-node audio validation,
+  cross-user cache perms, pre-publish credential scrub of the inherited LAN IP).
+- `jobs/` — ready-to-run job manifests.
 
 ## Changelog
 
-All improvements and design changes are recorded in `CHANGELOG.md`. **After each
-improvement or design change to the code, add a short entry under `[Unreleased]`.**
-When a set of changes is cut into a plugin version, move them under a new version
-heading and bump `sage.yaml`.
+All improvements and design changes are recorded in `CHANGELOG.md`. After each
+change, add an entry under `[Unreleased]`; cut it under a version heading and bump
+`sage.yaml` when a version ships.

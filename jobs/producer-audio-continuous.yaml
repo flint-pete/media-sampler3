@@ -1,0 +1,67 @@
+# ──────────────────────────────────────────────────────────────
+# media-sampler3 — AUDIO PRODUCER (continuous local ring cache)
+#
+# Records bounded FLAC clips from a microphone into a per-stream local ring cache,
+# each clip paired with a <clip>.json metadata sidecar. LOCAL-ONLY: this job NEVER
+# uploads. A consumer plugin (e.g. BirdNET, a sound-event detector) reads the ring
+# on its own schedule — one cheap producer, many consumers.
+#
+# TWO WAYS TO SOURCE AUDIO (pick one; this example uses a USB mic):
+#
+#   1) USB / ALSA microphone (this file):
+#        --media audio --source-type usb_mic --audio-source hw:1,0
+#      Find the device with `arecord -l` on the node; hw:<card>,<device>. No creds.
+#
+#   2) Camera microphone (Reolink FLV audio sub-stream):
+#        --media audio --source-type camera_mic
+#        --camera-host <ip> --camera-port 10000
+#      NO --audio-source: the URL is built internally from --camera-host + the
+#      env credentials (CAMERA_USER / CAMERA_PASSWORD), so NO password ever appears
+#      in args/argv. Provide creds via a Secret exactly like the image producer.
+#      Add --bandpass-fmax 8000 for a 16 kHz camera mic (Nyquist guard).
+#
+# CACHE LOCATION: --cache-root defaults to /local-cache (fail-fast if the mount is
+# absent — no silent fallback). The per-stream ring lives at
+# /local-cache/<cache-name>/<stream>/ ; agree on cache-name + stream with consumers.
+#
+# Submit (with a write-scoped token):
+#   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/producer-audio-continuous.yaml
+#   sesctl ... submit -j <returned-id>
+# ──────────────────────────────────────────────────────────────
+name: media-sampler3-audio-producer
+plugins:
+  - name: media-sampler3-audio-producer
+    pluginSpec:
+      image: registry.sagecontinuum.org/beckman/media-sampler3:0.1.0
+      args:
+        - "--continuous"
+        - "10"                       # start a new clip every 10s
+        - "--media"
+        - "audio"
+        - "--source-type"
+        - "usb_mic"
+        - "--audio-source"
+        - "hw:1,0"                   # ALSA device; check `arecord -l` on the node
+        - "--audio-format"
+        - "flac"                     # lossless, smaller than WAV
+        # clip length defaults to the --continuous period (10s) so clips tile
+        # the timeline; override with --clip-seconds if you want shorter clips.
+        - "--stream"
+        - "north_mic"                # /local-cache/<cache-name>/north_mic/
+        - "--cache-name"
+        - "birdaudio"
+        - "--cache-max-count"
+        - "500"                      # keep newest 500 clips (+ their sidecars)
+        - "--cache-max-mb"
+        - "2000"                     # ...or 2 GB, whichever trips first
+        - "--heartbeat-secs"
+        - "60"                       # liveness beat every 60s
+      selector:
+        zone: core
+nodes:
+  H00F: true
+scienceRules:
+  # Keep the producer running (it loops forever; restart if it exits).
+  - "schedule(media-sampler3-audio-producer): cronjob('media-sampler3-audio-producer', '@reboot')"
+successcriteria:
+  - WallClock('30day')
