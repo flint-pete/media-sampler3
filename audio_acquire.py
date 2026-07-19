@@ -105,7 +105,14 @@ def build_ffmpeg_cmd(*, source, source_type, out_path, clip_seconds, fmt="flac",
     cmd += ["-vn", "-ac", "1", "-t", str(int(clip_seconds))]
     if bandpass_fmax:
         cmd += ["-af", f"lowpass=f={int(bandpass_fmax)}"]
-    cmd += ["-c:a", "flac" if fmt == "flac" else "pcm_s16le", out_path]
+    # Force BOTH the codec and the muxer explicitly. The output path is a *.tmp
+    # (renamed into place after capture), which has no recognizable extension, so
+    # ffmpeg CANNOT infer the container from it -- without -f it errors with
+    # "Unable to choose an output format". -f flac / -f wav pins the muxer.
+    if fmt == "flac":
+        cmd += ["-c:a", "flac", "-f", "flac", out_path]
+    else:
+        cmd += ["-c:a", "pcm_s16le", "-f", "wav", out_path]
     return cmd
 
 

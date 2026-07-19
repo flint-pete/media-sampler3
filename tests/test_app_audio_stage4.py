@@ -88,6 +88,15 @@ def test_audio_flags_rejected_in_image_mode():
         app.validate_args(a)
 
 
+def test_audio_rejects_camera_still_source_type():
+    # camera_still is an image source; nonsensical for --media audio.
+    a = _parse(["--continuous", "10", "--stream", "m", "--cache-max-count", "1",
+                "--media", "audio", "--source-type", "camera_still",
+                "--audio-source", "hw:0,0"])
+    with pytest.raises(app.ConfigError):
+        app.validate_args(a)
+
+
 # --- audio source resolution: creds stay off the CLI (Bug 3 fix) ------------
 
 def test_resolve_audio_source_passthrough_for_usb_mic():

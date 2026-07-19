@@ -332,6 +332,10 @@ def validate_args(args):
     ]
     if media == "audio":
         st = getattr(args, "source_type", "usb_mic")
+        if st == "camera_still":
+            raise ConfigError("--source-type camera_still is an image source; use "
+                              "camera_mic / usb_mic / rtsp_audio / file with "
+                              "--media audio")
         if st == "camera_mic":
             # camera mic builds its URL from --camera-host + ENV creds (no CLI
             # password); --audio-source is not used for this source type.
@@ -702,7 +706,8 @@ def _audio_capture_to_tmp(*, source, source_type, clip_seconds, grace_s,
         clip_seconds=clip_seconds, grace_s=grace_s, fmt=fmt,
         bandpass_fmax=bandpass_fmax)
 
-    raw = open(clip_tmp, "rb").read()
+    with open(clip_tmp, "rb") as f:
+        raw = f.read()
     unique_id = audio_metadata.sha256_hex(raw)
     fields = audio_metadata.build_audio_field_dict(
         vsn=vsn, node_id=node_id, job=job, task=task, plugin=plugin_version,

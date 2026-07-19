@@ -9,6 +9,7 @@
 # (Reolink FLV / ALSA / RTSP), password redaction, format/duration validation,
 # timeout plumbing, and FLAC-magic validation of the produced bytes (ffmpeg mocked).
 
+import shutil
 import subprocess
 
 import pytest
@@ -176,3 +177,51 @@ def test_capture_clip_rejects_nonpositive_grace(tmp_path):
         audio_acquire.capture_clip(source="s", source_type="usb_mic",
                                    out_path=str(tmp_path / "c.flac"),
                                    clip_seconds=5, grace_s=0, fmt="flac")
+
+
+# --- muxer is forced explicitly (Bug 6: .tmp path has no inferable extension) ---
+
+def test_ffmpeg_cmd_forces_flac_muxer():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="hw:1,0", source_type="usb_mic",
+        out_path="/t/c.flac.tmp", clip_seconds=5, fmt="flac")
+    # -f flac must be present so ffmpeg does not try to infer from the .tmp path
+    assert "-f" in cmd and "flac" in cmd
+    fi = cmd.index("-f", cmd.index("-vn"))   # the OUTPUT -f (after -vn), not -f alsa
+    assert cmd[fi + 1] == "flac"
+
+
+def test_ffmpeg_cmd_forces_wav_muxer():
+    cmd = audio_acquire.build_ffmpeg_cmd(
+        source="hw:1,0", source_type="usb_mic",
+        out_path="/t/c.wav.tmp", clip_seconds=5, fmt="wav")
+    assert "pcm_s16le" in cmd
+    fi = cmd.index("-f", cmd.index("-vn"))
+    assert cmd[fi + 1] == "wav"
+
+
+# --- REAL ffmpeg integration: prove a clip actually encodes to a .tmp path ------
+# This is the class of bug unit mocks miss: ffmpeg muxer inference on the real
+# binary. Uses a synthetic lavfi source, so no hardware/network is needed.
+
+_HAS_FFMPEG = shutil.which("ffmpeg") is not None
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="ffmpeg not installed")
+@pytest.mark.parametrize("fmt,magic", [("flac", b"fLaC"), ("wav", b"RIFF")])
+def test_real_ffmpeg_encodes_to_tmp_path(tmp_path, monkeypatch, fmt, magic):
+    out = str(tmp_path / f"1783-v2-H00F-mic.{fmt}.tmp")
+    # Patch build_ffmpeg_cmd to replace the input spec with a synthetic lavfi tone,
+    # keeping the REAL codec/muxer/-t/out_path plumbing under test. Use a non-usb
+    # source_type so the input is a clean single "-i <source>" to swap.
+    real = audio_acquire.build_ffmpeg_cmd
+    def synth(**kw):
+        cmd = real(**kw)
+        i = cmd.index("-i")
+        cmd[i:i+2] = ["-f", "lavfi", "-i", "sine=frequency=440:duration=1"]
+        return cmd
+    monkeypatch.setattr(audio_acquire, "build_ffmpeg_cmd", synth)
+    path = audio_acquire.capture_clip(source="unused", source_type="rtsp_audio",
+                                      out_path=out, clip_seconds=1, fmt=fmt)
+    with open(path, "rb") as f:
+        assert f.read(4) == magic
