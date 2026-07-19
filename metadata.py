@@ -41,6 +41,11 @@ import piexif
 SCHEMA_VERSION = "sage-media-1"
 V2_MARKER = "v2"
 
+# Media extensions that count as a ring member (a real captured artifact). A
+# sidecar (.json) or in-flight write (.tmp) is deliberately NOT here, so the ring
+# counts by CLIP/FRAME, never by its metadata companion (design audio §4).
+MEDIA_EXTS = (".jpg", ".flac", ".wav")
+
 # UserComment requires an 8-byte character-code prefix (Exif spec). ASCII here.
 _UC_PREFIX = b"ASCII\x00\x00\x00"
 
@@ -88,9 +93,10 @@ def parse_v2_name(filename):
     """
     import os
     base = os.path.basename(filename)
-    if not base.endswith(".jpg"):
+    ext = next((e for e in MEDIA_EXTS if base.endswith(e)), None)
+    if ext is None:
         return None
-    stem = base[:-len(".jpg")]
+    stem = base[:-len(ext)]
     # Anchor on the "-v2-" marker rather than positional splitting: the timestamp
     # is all-digits (no '-'), so the FIRST "-v2-" after the leading digits delimits
     # <ts> from <vsn>-<camera>. This is robust to hyphens in vsn or camera (which

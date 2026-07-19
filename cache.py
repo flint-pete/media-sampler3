@@ -204,6 +204,14 @@ def scan_ring(sdir):
             unknown.append(path)
             continue
         capture_ts_ns = parsed[0]
+        # A logical frame = the media file + its optional <name>.json sidecar; fold
+        # the sidecar's bytes into the member size so byte-caps account for the pair
+        # (audio §4). The sidecar is never an independent member (parse rejects .json).
+        sidecar = path + ".json"
+        try:
+            size += os.path.getsize(sidecar)
+        except OSError:
+            pass                          # no sidecar (image path) or vanished
         members.append(RingMember(path, name, capture_ts_ns, size, capture_ts_ns))
 
     members.sort(key=lambda m: (m.sort_key, m.name))   # oldest first, stable
@@ -326,3 +334,56 @@ def _safe_remove(path, warnings, what):
         pass
     except OSError as e:
         warnings.append("could not remove %s %r: %s" % (what, path, e))
+
+
+def commit_capture_pair(sdir, clip_tmp, sidecar_tmp, final_name, plan):
+    """Sidecar-aware commit for an audio frame (clip + <clip>.json).
+
+    Same evict-first ordering as commit_capture, but the atomic publish renames the
+    SIDECAR FIRST, then the clip -- so a consumer that observes the clip is
+    guaranteed the sidecar already exists (read-after-clip is always complete,
+    audio §4). Eviction deletes BOTH the victim clip and its .json. Fail-soft on
+    delete errors; the clip rename is the authoritative success signal.
+    """
+    warnings = []
+    evicted = []
+
+    if plan.drop_new:
+        _safe_remove(clip_tmp, warnings, "drop-new clip tmp")
+        _safe_remove(sidecar_tmp, warnings, "drop-new sidecar tmp")
+        if plan.reason:
+            warnings.append(plan.reason)
+        return CommitResult(False, None, evicted, warnings)
+
+    # 1. Evict oldest first -- clip AND its sidecar (fail-soft).
+    for victim in plan.evict:
+        try:
+            os.remove(victim.path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            warnings.append("eviction failed for %r: %s" % (victim.path, e))
+        _safe_remove(victim.path + ".json", warnings, "evicted sidecar")
+        evicted.append(victim.path)
+
+    # 2. Publish sidecar first, then clip (order is the whole point).
+    final_clip = os.path.join(sdir, final_name)
+    final_side = final_clip + ".json"
+    try:
+        os.replace(sidecar_tmp, final_side)
+    except OSError as e:
+        warnings.append("sidecar publish failed (%r -> %r): %s"
+                        % (sidecar_tmp, final_side, e))
+        _safe_remove(clip_tmp, warnings, "failed-publish clip tmp")
+        _safe_remove(sidecar_tmp, warnings, "failed-publish sidecar tmp")
+        return CommitResult(False, None, evicted, warnings)
+    try:
+        os.replace(clip_tmp, final_clip)
+    except OSError as e:
+        warnings.append("clip publish failed (%r -> %r): %s"
+                        % (clip_tmp, final_clip, e))
+        _safe_remove(clip_tmp, warnings, "failed-publish clip tmp")
+        _safe_remove(final_side, warnings, "orphaned sidecar")  # no clip -> drop it
+        return CommitResult(False, None, evicted, warnings)
+
+    return CommitResult(True, final_clip, evicted, warnings)
