@@ -59,6 +59,7 @@ are upstream (WES). Needs the design doc filed as issues on waggle-edge-stack.
 
 ----------------------------------------------------------------------------------
 BLOCKER 2 — Cross-user cache reads unverified (design 4.2, OPEN)
+  ** RESOLVED 2026-07-19 — cross-user READ verified live on H00F. See note. **
 ----------------------------------------------------------------------------------
 Even WITH a shared mount, the premise requires a consumer pod running as a
 DIFFERENT user to read the producer's files. Flagged OPEN; the on-node probes were
@@ -66,6 +67,21 @@ never done. If reads fail we likely need world-readable files + traversable dirs
 (chmod-on-write) — a small code change.
 CONTROL: ours (needs an on-node probe) — but moot until Blocker 1's mount exists
 to test against.
+
+** RESOLVED 2026-07-19 — verified live on H00F: **
+The design need is cross-user READ (a consumer running as user-A reads files a
+producer created as user-B), NOT cross-user eviction. Each producer bounds its own
+cache; consumers are strictly non-destructive readers (e.g. BirdNet reads audio,
+yolo2 reads image-sampler2 frames, BioClip reads crops). Probe: a root-owned
+producer file (0644) in a 0755 dir under the sticky 0777 /local-cache was READ,
+its sidecar READ, its dir LISTED, and the parent TRAVERSED successfully by BOTH a
+distinct non-root user (beckman uid 2016) AND nobody (uid 65534, most-restricted).
+So cross-user read WORKS out of the box: pluginctl/pywaggle write 0644, dirs are
+0755, and media-sampler3's write_sidecar explicitly chmods 0644. NOTE: files are
+owned by the producer (root for a pluginctl pod), so cross-user EVICTION is
+owner-gated — but that is by design and never needed (a consumer never deletes a
+producer's files; the producer alone bounds its ring). Blocker 2's actual
+requirement (consumer read across users) is met.
 
 ----------------------------------------------------------------------------------
 BLOCKER 3 — ECR builds dead -> not deployable via the normal path (Infra #2)
