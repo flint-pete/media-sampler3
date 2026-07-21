@@ -13,6 +13,21 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 
 ## [Unreleased]
 
+### Verified
+- **Audio path on-node validated on H00F (2026-07-19).** Native aarch64 build +
+  k3s side-load; ran via `sudo pluginctl run` against the LIVE Reolink hummingbird
+  camera mic (`10.107.0.221:10000`, `channel0_sub`) into the real shared
+  `/media/plugin-data/local-cache`. Confirmed on hardware: valid 16 kHz mono FLAC
+  clips + correct v2 sidecars; ring caps at `--cache-max-count` with oldest-first
+  eviction (clip+sidecar atomic, 0 stray `.tmp`); heartbeat fires on its own grid
+  with delta-reset counters. Also proved live: the `-f` muxer fix (clips write to
+  `.tmp` then commit), the `clip_seconds + grace` timeout, and env-only credentials
+  (`--env-from`, password never in argv). Cross-user cache READ verified (root-
+  produced 0644 files read by `beckman` and `nobody`). Blockers 1 (mount) and 2
+  (cross-user read) in `readiness-gap.txt` marked RESOLVED. Known remaining:
+  `vsn=NODE` placeholder + null GPS (WES runtime-identity gap, Limiter 1, same as
+  every plugin). Full record + resume instructions in `RESUME-HERE.md`.
+
 ### Fixed
 - **Dockerfile now installs ffmpeg + ships the audio modules.** The audio path
   shells out to `ffmpeg`, which was not in the image (would fail `ffmpeg not found

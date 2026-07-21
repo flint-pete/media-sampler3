@@ -11,17 +11,19 @@ multi-media producer built around one self-describing **v2 cache-frame contract*
 
 ## Status
 
-**v0.1.0 — image path shipped & verified on H00F; audio path code-complete.**
-232 tests passing (8 hardware-gated integration tests skip offline).
+**v0.1.0 — image AND audio paths built, tested, and verified on H00F.**
+237 tests passing (8 image tests skip offline: no PIL in the test venv).
 
 - **Image capture** (inherited from imagesampler v0.5.1, fully proven): single
   real capture, capture-time v2 naming + self-describing EXIF/JSON embed, one-shot
   upload to Beehive, `--continuous` ring cache, cache heartbeat/liveness,
   `--from-cache` uploader, and self-exit bounds for GPU time-sharing.
 - **Audio capture** (new in media-sampler3): bounded FLAC/WAV clips captured via
-  ffmpeg into the same ring, each with a `<clip>.json` metadata sidecar. Wired
-  end-to-end and unit-verified; **on-node hardware validation is the remaining
-  step** (see `readiness-gap.txt`).
+  ffmpeg into the same ring, each with a `<clip>.json` metadata sidecar.
+  **On-node validated on H00F 2026-07-19** — live Reolink camera-mic capture,
+  ring cap + oldest-first eviction, heartbeat on its own grid, and cross-user
+  cache reads all confirmed on real aarch64 hardware. See `RESUME-HERE.md` for the
+  full validation record and the remaining deployment step (Step 4).
 
 The producer/consumer loop uses the shared `/local-cache` node cache provided by
 the `wes-local-cache-manager` WES component; if that mount is absent the plugin
