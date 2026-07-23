@@ -14,6 +14,16 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Verified
+- **Cut-over A confirmed in production over 12h+ (2026-07-24 morning check).** The
+  full cascade ran overnight with media-sampler3 as the image producer and
+  produced real science: pods all Running 0 restarts after 12h (no reboot);
+  sage-yolo2 detected live birds (`env.count.bird`, annotated uploads, crops into
+  `hummingcam-crops`); the new sage-bioclip2 (BioCLIP-2.5) classified the crops as
+  **_Archilochus colubris_ (Ruby-throated Hummingbird)** at 89–100% confidence and
+  published `env.species.species` to Beehive with full provenance
+  (`common_name`, `source_class`, `source_confidence`, `source_unique_id` tracing
+  each species call back through the yolo detection to the parent ms3 frame).
+  media-sampler3 is a proven drop-in replacement for image-sampler2.
 - **GREAT CUT-OVER A — media-sampler3 replaces image-sampler2 as the live image
   producer on H00F (2026-07-23).** After a node reboot took the whole pipeline
   down, brought it back up with media-sampler3 (not image-sampler2) as the
