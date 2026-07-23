@@ -14,6 +14,33 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Verified
+- **GREAT CUT-OVER A — media-sampler3 replaces image-sampler2 as the live image
+  producer on H00F (2026-07-23).** After a node reboot took the whole pipeline
+  down, brought it back up with media-sampler3 (not image-sampler2) as the
+  `hummingcam-producer`, using image-sampler2's EXACT production spec (image
+  swapped only; creds via `--env-from`, not inline): `--continuous 10 --media
+  image --stream top_camera --name top --cache-name hummingcam --cache-max-count
+  500 --cache-max-mb 500 --heartbeat-secs 60 --vsn H00F`. Results:
+  - **Producer:** pod `hummingcam-producer` image = `localhost/media-sampler3:0.1.0`,
+    1/1 Running 0 restarts, fresh frames every 10 s into `/local-cache/hummingcam/top/`.
+  - **Structural parity with image-sampler2:** identical filename format
+    `<ts>-v2-H00F-top.jpg`; valid 3840×2160 baseline JPEG; metadata in **EXIF**
+    (no per-image sidecar — matches image-sampler2 exactly; 0 `.json` / 347 `.jpg`);
+    EXIF carries `Sage media-sampler3 v2; vsn=H00F; camera=top; job=sage`.
+  - **CONFIRMED yolo2 CONSUME:** `sage-yolo2:2.1.0` read the 5 newest
+    ms3-produced frames (`1784769553…`–`1784769593…`) from the shared cache,
+    loaded yolo11x on CUDA, ran inference on each (seen-store advanced) — reads
+    ms3 output byte-identically to how it read image-sampler2. Crop-producer armed
+    (`hummingcam-crops`).
+  - **Full cascade restarted:** persistent `sage-yolo2-consumer` (--every 5m,
+    crop-produce) + the NEW `sage-bioclip2-consumer` (2.0.0, BioCLIP-2.5,
+    --every 10m, reads `hummingcam-crops/top-crop-0`). All 3 stages 1/1 Running
+    0 restarts.
+  - **pywaggle2 pieces re-shimmed post-reboot:** `wes-local-cache-manager`
+    DaemonSet survived the reboot; re-added the wes-nodeinfo-injection Tier 1
+    (wes-identity ConfigMap → 5 vars, pywaggle2 reader confirmed real
+    vsn=H00F/lat=41.718/lon=-87.983) + Tier 2 (patched edge-scheduler side-loaded,
+    rolled out 1/1, auto-injects `envFrom: wes-identity` fleet-wide).
 - **Step 4 — sustained-liveness + Beehive telemetry validated on H00F (2026-07-23).**
   Ran the bounded production shape via `sudo pluginctl run` (`--continuous 15
   --cache-max-count 20 --heartbeat-secs 60 --max-runtime 300`) against the live
