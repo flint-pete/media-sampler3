@@ -89,18 +89,29 @@ pod 1/1 Running 0 restarts for the full window; ring filled 1→20 and held at c
 `env.mediasampler.cache.*` heartbeats were queryable from Beehive
 (data.sagecontinuum.org) with meta `vsn=H00F`. Details in CHANGELOG [Unreleased].
 
-### Decision waiting for Pete — persistent deploy?  ← DO THIS NEXT
-Everything is proven; the only remaining product question is whether to leave a
-**genuinely persistent** audio producer running on H00F.
-- **Option B — persistent deploy:** submit `jobs/producer-audio-continuous.yaml`
-  (edit first: `--source-type camera_mic`, `--camera-host 10.107.0.221`, and wire
-  creds via a **k8s Secret / `secretRef`**, NOT inline args — see the
-  FUTURE-ENHANCEMENT note in `readiness-gap.txt`). Runs indefinitely as the real
-  audio producer feeding a future BirdNet consumer.
-- **Or stop here** — the plugin is validated; deploy when a consumer is ready.
+### Audio producer — DEPLOYED & LIVE on H00F (2026-07-24) ✓
+A second media-sampler3 instance, `hummingcam-audio-producer`, now runs alongside
+the image producer: **15 s FLAC clips once per minute** from the camera mic into
+`/local-cache/hummingcam-audio/hummingcam_mic/`. Verified: pod 1/1 Running 0
+restarts; clips are FLAC 16 kHz mono exactly 15.000 s; correct v2 sidecars
+(`media_type=audio`, `source_type=camera_mic`, real SHA-256 `unique_id`); 60.0 s
+cadence on the monotonic grid; `env.mediasampler.cache.*` heartbeats reach Beehive
+(`task=hummingcam-audio-producer`). Run command + restart steps are in the reboot
+runbook (`../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md`, step 4b).
 
-To re-run the bounded validation anytime, recreate the creds file (below) and use
-the `sudo pluginctl run ... --max-runtime 300` command from the CHANGELOG entry.
+Config: `--continuous 60 --clip-seconds 15 --media audio --source-type camera_mic
+--audio-format flac --bandpass-fmax 8000 --stream hummingcam_mic --cache-name
+hummingcam-audio --cache-max-count 500 --cache-max-mb 2000`, creds (sage account)
+via `--env-from ~/ms3-audio-creds.env`.
+
+**NEXT for the audio track:** wire a **BirdNET consumer** to read the
+`hummingcam-audio/hummingcam_mic/` ring (the whole point of the producer/consumer
+split — clips are accumulating now; add the reader when ready). Not reboot-durable
+(side-loaded `pluginctl run`) — see the runbook. A `secretRef`-based persistent
+SES deploy + registry publish stays the CI-owned future step.
+
+To re-run a BOUNDED audio validation anytime, add `--max-runtime 300` and use the
+`sudo pluginctl run` command from the CHANGELOG entry.
 
 Creds file (deleted after each session for hygiene; `sage` account, Pete has the
 password — do NOT hardcode into any committed file):
