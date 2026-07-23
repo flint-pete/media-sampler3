@@ -2,6 +2,11 @@
 
 **One-file pickup point.** Read this to resume cold. Last worked: 2026-07-23.
 
+> **If the node rebooted** (all pods `Unknown`/`Failed`, cache timestamps frozen),
+> the side-loaded experimental stack must be re-added by hand. Follow the runbook:
+> `../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md` — do NOT re-derive
+> the steps.
+
 ---
 
 ## TL;DR — where things stand

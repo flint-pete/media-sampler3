@@ -15,10 +15,13 @@ Collecting images and audio is a fundamental way to gather training data and to
 capture the sensory context in which an inference was made — a bird detected in a
 clip, an object seen in a frame.
 
-> Status: **v0.1.0.** The image path is shipped and verified end-to-end on a live
-> node (H00F). The audio path is code-complete and unit-verified; on-node hardware
-> validation is the remaining step. 232 tests passing. Full audio design:
-> `docs/AUDIO-EXTENSION-DESIGN.md`.
+> Status: **v0.1.0.** Both media paths are verified end-to-end on a live node
+> (H00F). The **image path is in PRODUCTION** — as of 2026-07-23 media-sampler3
+> replaced the legacy `image-sampler2` as the live `hummingcam` image producer
+> (the "great cut-over"), feeding the sage-yolo2 detector and sage-bioclip2
+> species classifier from the shared `/local-cache`. The **audio path** is
+> on-node validated (sustained-liveness + Beehive telemetry). 237 tests passing.
+> Full audio design: `docs/AUDIO-EXTENSION-DESIGN.md`.
 
 ---
 

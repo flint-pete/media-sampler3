@@ -11,8 +11,17 @@ multi-media producer built around one self-describing **v2 cache-frame contract*
 
 ## Status
 
-**v0.1.0 — image AND audio paths built, tested, and verified on H00F.**
-237 tests passing (8 image tests skip offline: no PIL in the test venv).
+**v0.1.0 — image AND audio paths built, tested, and verified on H00F. Image path
+is IN PRODUCTION.** 237 tests passing (8 image tests skip offline: no PIL in the
+test venv).
+
+As of **2026-07-23**, media-sampler3 **replaced the legacy `image-sampler2`** as
+the live `hummingcam` image producer on H00F (the "great cut-over") — feeding the
+sage-yolo2 detector → sage-bioclip2 species-classifier cascade from the shared
+`/local-cache`. Confirmed drop-in: identical `<ts>-v2-<vsn>-<name>.jpg` naming,
+4K EXIF-tagged JPEGs, and yolo2 consumes ms3 frames with cloud `env.count.*`
+publish. If the node reboots, follow the recovery runbook:
+`../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md`.
 
 - **Image capture** (inherited from imagesampler v0.5.1, fully proven): single
   real capture, capture-time v2 naming + self-describing EXIF/JSON embed, one-shot
