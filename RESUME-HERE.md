@@ -1,6 +1,6 @@
 # RESUME HERE — media-sampler3 audio producer
 
-**One-file pickup point.** Read this to resume cold. Last worked: 2026-07-19.
+**One-file pickup point.** Read this to resume cold. Last worked: 2026-07-23.
 
 ---
 
@@ -8,16 +8,18 @@
 
 media-sampler3 = a versatile fork of image-sampler2 that captures **audio clips**
 (FLAC) into the shared `/local-cache` the same self-describing v2 way it captures
-JPEGs. **The audio path is code-complete, reviewed, and ON-NODE VALIDATED on H00F.**
+JPEGs. **The audio path is code-complete, reviewed, and ON-NODE VALIDATED on H00F,
+including a full sustained-liveness + Beehive-telemetry run.**
 
 - Repo: `~/AI-projects/media-sampler3`, clean, `main`. Version **0.1.0**.
 - Tests: **237 passed / 8 skipped** (`make test`; the 8 skips = image tests, no PIL
   in `.venv-test`).
 - Image on H00F: built native aarch64, side-loaded into k3s as
   `localhost/media-sampler3:0.1.0` (linux/arm64).
-- **DONE:** Steps 0-3 (image build, side-load, smoke capture, ring/evict/heartbeat).
-- **NEXT:** Step 4 (deploy as a real k8s job + sustained-liveness check), then Step 5
-  (final evidence + cleanup). See "NEXT STEPS" below.
+- **DONE:** Steps 0-4. Step 4 (2026-07-23): bounded 5-min production run held the
+  ring at cap 20, stayed 1/1 Running the whole window, self-exited clean, and its
+  `env.mediasampler.cache.*` heartbeats reached Beehive (queryable, meta vsn=H00F).
+- **NEXT:** Step 5 finalize + the persistent-deploy decision. See "NEXT STEPS".
 
 ---
 
@@ -75,41 +77,34 @@ Podman tags images `localhost/<name>` — mind the prefix in k3s.
 
 ## NEXT STEPS
 
-### Step 4 — deploy as a real k8s job + sustained-liveness check  ← DO THIS NEXT
-So far all runs were bounded smoke tests. Step 4 runs it like production and
-confirms it stays healthy over time.
+### Step 4 — DONE (2026-07-23) ✓
+Bounded 5-min production run validated sustained liveness end-to-end:
+pod 1/1 Running 0 restarts for the full window; ring filled 1→20 and held at cap;
+`--max-runtime` self-exit clean (exit 0); newest clip ffprobe-valid FLAC; and the
+`env.mediasampler.cache.*` heartbeats were queryable from Beehive
+(data.sagecontinuum.org) with meta `vsn=H00F`. Details in CHANGELOG [Unreleased].
 
-1. Recreate the creds file on the node (deleted after each session for hygiene).
-   Use the real camera user/password (the `sage` account on the hummingbird cam —
-   Pete has the current password; do NOT hardcode it into any committed file):
-   ```bash
-   ssh beckman@node-H00F.sage
-   umask 077
-   printf 'CAMERA_USER=sage\nCAMERA_PASSWORD=<REDACTED>\n' > ~/ms3-creds.env
-   chmod 600 ~/ms3-creds.env
-   ```
-2. **Recommended first pass — bounded-but-longer** (~5 min, self-exits, own subtree):
-   ```bash
-   sudo pluginctl run --name ms3-audio-prod --selector zone=core \
-     --env-from ~/ms3-creds.env \
-     -v /media/plugin-data/local-cache:/local-cache \
-     localhost/media-sampler3:0.1.0 -- \
-     --continuous 15 --media audio --source-type camera_mic \
-     --camera-host 10.107.0.221 --camera-port 10000 \
-     --stream hummingcam_mic --cache-name hummingcam-audio \
-     --cache-max-count 20 --heartbeat-secs 60 --max-runtime 300
-   ```
-   Verify: pod stays Running the whole window; ring fills then holds at 20;
-   heartbeat `env.mediasampler.cache.*` records queryable from the Sage portal
-   (see how BirdNet/image-sampler2 query theirs). Confirm `--max-runtime` self-exit.
-3. **Genuinely persistent deploy** (only if desired) — submit
-   `jobs/producer-audio-continuous.yaml` (edit it first: set `--source-type
-   camera_mic`, `--camera-host 10.107.0.221`, and wire creds via a **k8s Secret /
-   `secretRef`**, NOT inline args — see the FUTURE-ENHANCEMENT note in
-   `readiness-gap.txt`). Then it runs indefinitely as the audio producer.
+### Decision waiting for Pete — persistent deploy?  ← DO THIS NEXT
+Everything is proven; the only remaining product question is whether to leave a
+**genuinely persistent** audio producer running on H00F.
+- **Option B — persistent deploy:** submit `jobs/producer-audio-continuous.yaml`
+  (edit first: `--source-type camera_mic`, `--camera-host 10.107.0.221`, and wire
+  creds via a **k8s Secret / `secretRef`**, NOT inline args — see the
+  FUTURE-ENHANCEMENT note in `readiness-gap.txt`). Runs indefinitely as the real
+  audio producer feeding a future BirdNet consumer.
+- **Or stop here** — the plugin is validated; deploy when a consumer is ready.
 
-**Decision waiting for Pete:** bounded 5-min validation vs. leaving a persistent
-producer running on H00F. (Lean: bounded first, then decide on persistent.)
+To re-run the bounded validation anytime, recreate the creds file (below) and use
+the `sudo pluginctl run ... --max-runtime 300` command from the CHANGELOG entry.
+
+Creds file (deleted after each session for hygiene; `sage` account, Pete has the
+password — do NOT hardcode into any committed file):
+```bash
+ssh beckman@node-H00F.sage
+umask 077
+printf 'CAMERA_USER=sage\nCAMERA_PASSWORD=<REDACTED>\n' > ~/ms3-creds.env
+chmod 600 ~/ms3-creds.env
+```
 
 ### Step 5 — finalize
 - Record Step 4 evidence (pod uptime, ring listing, portal heartbeat query) into

@@ -14,6 +14,18 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
 ## [Unreleased]
 
 ### Verified
+- **Step 4 — sustained-liveness + Beehive telemetry validated on H00F (2026-07-23).**
+  Ran the bounded production shape via `sudo pluginctl run` (`--continuous 15
+  --cache-max-count 20 --heartbeat-secs 60 --max-runtime 300`) against the live
+  camera mic. Results: pod `ms3-audio-prod` stayed **1/1 Running, 0 restarts** for
+  the full 5-min window; ring filled monotonically 1→20 and **held at the cap 20**
+  (20 clips + 20 sidecars, 0 stray `.tmp`, 8.0 MB); `--max-runtime` **self-exit
+  clean** (exit 0, pod gone). Newest clip ffprobe-valid (flac, 16 kHz, mono,
+  14.976 s). **Heartbeat telemetry reached Beehive** — `env.mediasampler.cache.*`
+  queryable from data.sagecontinuum.org with `cache.bytes` tracking ring growth
+  (0→1.67M→3.31M→5.01M→6.22M→…) and meta carrying **`vsn=H00F`** attached
+  downstream (plugin logs the `NODE` placeholder locally — Limiter 1 confirmed, not
+  a bug). Full node→plugin→cloud path proven. Test subtree + creds cleaned up.
 - **Audio path on-node validated on H00F (2026-07-19).** Native aarch64 build +
   k3s side-load; ran via `sudo pluginctl run` against the LIVE Reolink hummingbird
   camera mic (`10.107.0.221:10000`, `channel0_sub`) into the real shared
