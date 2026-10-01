@@ -47,7 +47,7 @@ links back here.
 |------|---------|-------|
 | wes-local-cache-manager | tag `v0.2.1` | its script builds the image from source as `:test` |
 | wes-nodeinfo-injection | tag `v1.0.1` | |
-| pywaggle2-nodeinfo | tag `v0.1.1` | vendored into yolo2/bioclip2 as v0.1.0 (same code) |
+| pywaggle2-nodeinfo | tag `v0.1.1` | copied into yolo2/bioclip2 as `node_info.py` (v0.1.1) |
 | media-sampler3 | tag `v0.1.0` | image `localhost/media-sampler3:0.1.0` |
 | sage-yolo2 | image `2.1.0` (`master`) | |
 | sage-bioclip2 | image `2.0.0` (`master`) | |
@@ -126,8 +126,9 @@ worked.)
 > after WES provisioning**, and re-apply it after any WES (re)install or update.
 > [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md) checks for this after a reboot.
 
-The node also needs (a standard Thor has them all, but check): `podman`, `k3s`,
-`pluginctl`, `git`, `make`, `curl`, and **working DNS**, because image builds pull
+The node also needs (a standard Thor has them all, but check): `podman` (media-sampler3
+and cache-manager builds), `docker` (the yolo2/bioclip2 `deploy-sideload.sh` builds),
+`k3s`, `pluginctl`, `git`, `make`, `curl`, and **working DNS**, because image builds pull
 base images from Docker Hub and `nvcr.io`. Host Go is **not** needed. Tier 2 below
 compiles Go inside a container; Go is only needed if you want to run
 wes-nodeinfo-injection's offline unit tests.

@@ -153,7 +153,7 @@ Copies that must stay in sync with the canonical code:
 - `wes-nodeinfo-injection/pywaggle2/` (a byte-identical mirror)
 - the inline reader in its test pod
 - `media-sampler3/nodemeta.py` (a re-implementation)
-- `sage-yolo2/node_info.py` and `sage-bioclip2/node_info.py` (vendored v0.1.0)
+- `sage-yolo2/node_info.py` and `sage-bioclip2/node_info.py` (vendored v0.1.1)
 
 ---
 
