@@ -1,4 +1,4 @@
-# Deploying the hummingcam media stack on a new Thor node
+# Deploying the media-sampler3 media stack on a new Thor node
 
 A student-facing guide to install four custom Sage/Waggle components onto a fresh
 Jetson **Thor (AGX, ARM64)** node and validate them with the **sage-yolo2 →
@@ -40,7 +40,7 @@ sage-bioclip2 `v2.0.0`.
 
 ```
         ┌─────────────────┐   writes JPEG    ┌──────────────────────────────┐
-camera ─▶│  media-sampler3 │─── ring cache ──▶│  /local-cache/hummingcam/top │
+camera ─▶│  media-sampler3 │─── ring cache ──▶│  /local-cache/camera/top │
         │   (PRODUCER)    │                  └──────────────┬───────────────┘
         └─────────────────┘                                 │ reads (non-destructive)
                                                              ▼
@@ -48,7 +48,7 @@ camera ─▶│  media-sampler3 │─── ring cache ──▶│  /local-ca
                                                    │     sage-yolo2    │──────────────┐
                                                    │  detect + crop    │              │
                                                    └─────────┬─────────┘              ▼
-                                                             │  publishes   /local-cache/hummingcam-crops
+                                                             │  publishes   /local-cache/camera-crops
                                                              │  env.count.* to Beehive        │
                                                              ▼                                 │ reads
                                                    ┌───────────────────┐                       │
@@ -332,10 +332,10 @@ the core zone.
 ### 6a. (No camera) seed a synthetic cache
 
 ```bash
-sudo mkdir -p /media/plugin-data/local-cache/hummingcam/top
+sudo mkdir -p /media/plugin-data/local-cache/camera/top
 # copy in a few sample JPEGs named like real frames: <ns>-v2-<VSN>-top.jpg
 # any JPEGs prove the plumbing; bird images actually exercise the detector (see 6f)
-sudo ls -l /media/plugin-data/local-cache/hummingcam/top/
+sudo ls -l /media/plugin-data/local-cache/camera/top/
 ```
 
 ### 6b. (Cameras attached) run the live producers — one per camera
@@ -369,27 +369,27 @@ chmod 600 ~/ms3-cam-creds.env      # node-local only — never commit, never put
 ```
 
 Launch **two producers**, one per camera, each writing to its own cache subtree
-(`hummingcam/top`, `hummingcam/side`). `pluginctl run --continuous` **blocks**
+(`camera/top`, `camera/side`). `pluginctl run --continuous` **blocks**
 (stays attached), so background each launch (`&`) or run them in separate shells:
 
 ```bash
-# Camera 1 -> hummingcam/top
-sudo pluginctl run --name hummingcam-producer --selector zone=core \
+# Camera 1 -> camera/top
+sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
-  --cache-root /local-cache --cache-name hummingcam \
+  --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 --vsn "$VSN" \
   --camera-host <CAM1_IP> --camera-port 80 &
 
-# Camera 2 -> hummingcam/side
-sudo pluginctl run --name hummingcam-producer-side --selector zone=core \
+# Camera 2 -> camera/side
+sudo pluginctl run --name camera-producer-side --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
   --continuous 10 --media image --stream side_camera --name side \
-  --cache-root /local-cache --cache-name hummingcam \
+  --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 --vsn "$VSN" \
   --camera-host <CAM2_IP> --camera-port 80 &
 ```
@@ -397,8 +397,8 @@ sudo pluginctl run --name hummingcam-producer-side --selector zone=core \
 Verify fresh 4K frames (`<ts>-v2-<VSN>-top.jpg` / `-side.jpg`) appear every 10 s:
 
 ```bash
-sudo ls -lt /media/plugin-data/local-cache/hummingcam/top/  | head
-sudo ls -lt /media/plugin-data/local-cache/hummingcam/side/ | head
+sudo ls -lt /media/plugin-data/local-cache/camera/top/  | head
+sudo ls -lt /media/plugin-data/local-cache/camera/side/ | head
 ```
 
 On H041 both producers ran 1/1, capturing 3840×2160 JPEGs (~240–370 KB) to the two
@@ -414,14 +414,14 @@ subtrees from the shared `sagestudent` account. If a producer logs HTTP 404 on
 15 s FLAC once/min. Only relevant if you want audio and the camera's 554 is open:
 
 ```bash
-sudo pluginctl run --name hummingcam-audio-producer --selector zone=core \
+sudo pluginctl run --name camera-audio-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
   --camera-host <CAM_IP> --camera-port 554 \
   --audio-format flac --bandpass-fmax 8000 \
-  --stream hummingcam_mic --cache-name hummingcam-audio \
+  --stream mic --cache-name camera-audio \
   --cache-max-count 500 --cache-max-mb 2000 --heartbeat-secs 60 --vsn "$VSN" &
 ```
 
@@ -433,12 +433,12 @@ GPU consumers **must** set a memory limit (else OOMKilled, exit 137):
 sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
-  -e WAGGLE_JOB_NAME=hummingcam -e WAGGLE_TASK_NAME=sage-yolo2 \
+  -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-yolo2 \
   registry.sagecontinuum.org/beckman/sage-yolo2:2.1.0 -- \
-  --source cache --input /local-cache/hummingcam/top \
+  --source cache --input /local-cache/camera/top \
   --every 5m --all-unseen --max-frames 0 \
   --model yolo11x.pt --conf-thres 0.25 --classes bird \
-  --crop-match "bird:0.4" --crop-padding 0.15 --crop-cache-name hummingcam-crops
+  --crop-match "bird:0.4" --crop-padding 0.15 --crop-cache-name camera-crops
 ```
 
 ### 6d. Run bioclip2 (species classifier)
@@ -447,9 +447,9 @@ sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
 sudo pluginctl run --name sage-bioclip2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
-  -e WAGGLE_JOB_NAME=hummingcam -e WAGGLE_TASK_NAME=sage-bioclip2 \
+  -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-bioclip2 \
   registry.sagecontinuum.org/beckman/sage-bioclip2:2.0.0 -- \
-  --source cache --input /local-cache/hummingcam-crops/top-crop-0 \
+  --source cache --input /local-cache/camera-crops/top-crop-0 \
   --every 10m --all-unseen --max-frames 0 --rank Species --min-confidence 0.1
 ```
 
@@ -460,9 +460,9 @@ crop subdir suffix (`top-crop-0`) is derived from the source stream name.
 ### 6e. Verify end-to-end
 
 ```bash
-sudo k3s kubectl get pods | grep -iE 'hummingcam|yolo2-consumer|bioclip2-consumer'
-ls -lt /media/plugin-data/local-cache/hummingcam/top/ | head           # frames
-ls -lt /media/plugin-data/local-cache/hummingcam-crops/ 2>/dev/null    # crops
+sudo k3s kubectl get pods | grep -iE 'camera-producer|yolo2-consumer|bioclip2-consumer'
+ls -lt /media/plugin-data/local-cache/camera/top/ | head           # frames
+ls -lt /media/plugin-data/local-cache/camera-crops/ 2>/dev/null    # crops
 
 # cloud proof: yolo2 publishes counts to Beehive (needs rabbitmq + upload-agent up)
 curl -s -X POST https://data.sagecontinuum.org/api/v1/query \
@@ -483,12 +483,12 @@ image. **sage-yolo2 ships one** as a fixture (added after the H041 run):
 ```bash
 # public-domain Northern Cardinal, confirmed to detect as "bird"
 cp ~/AI-projects/sage-yolo2/tests/test-images/bird-cardinal-sample.jpg \
-   /media/plugin-data/local-cache/hummingcam/top/$(date +%s%N)-v2-$VSN-top.jpg
+   /media/plugin-data/local-cache/camera/top/$(date +%s%N)-v2-$VSN-top.jpg
 # yolo2 picks it up on its next --every wake (or restart the consumer to process now)
 ```
 
 On H041 this produced `env.count.bird = 1`, a crop under
-`hummingcam-crops/top-crop-0/`, and bioclip2 then classified it
+`camera-crops/top-crop-0/`, and bioclip2 then classified it
 **`Cardinalis cardinalis` (100%)** — the proof the whole cascade works. (A second
 test with an Australian robin classified as *Eopsaltria australis*, 100%.) Note the
 repo's generic `tests/test-images/*` are camera-sized photos with no guaranteed
@@ -517,7 +517,7 @@ wes-identity "reverts on every reboot" — that was wrong; it reverts on WES
 Clear stale pods before relaunching:
 
 ```bash
-sudo k3s kubectl delete pod hummingcam-producer hummingcam-audio-producer \
+sudo k3s kubectl delete pod camera-producer camera-audio-producer \
   sage-yolo2-consumer sage-bioclip2-consumer \
   --ignore-not-found --grace-period=0 --force
 ```

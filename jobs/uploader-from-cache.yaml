@@ -20,7 +20,7 @@
 # credentials are needed here (this job never contacts the camera).
 #
 # --from-cache <dir> points at the STREAM dir the producer writes to:
-#   <cache-root>/<cache-name>/<camera>/  ==  /local-cache/hummingcam/top
+#   <cache-root>/<cache-name>/<camera>/  ==  /local-cache/camera/top
 #
 # TUNING THE RATE: change the cron expression in scienceRules.
 #   '*/30 * * * *' = every 30 min  |  '*/10 * * * *' = every 10 min
@@ -43,7 +43,7 @@ plugins:
         - "--stream"
         - "top"
         - "--from-cache"
-        - "/local-cache/hummingcam/top"   # the producer's STREAM dir
+        - "/local-cache/camera/top"   # the producer's STREAM dir (example cache name)
       selector:
         zone: core
 nodes:

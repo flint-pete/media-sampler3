@@ -15,13 +15,14 @@ multi-media producer built around one self-describing **v2 cache-frame contract*
 is IN PRODUCTION.** 237 tests passing (8 image tests skip offline: no PIL in the
 test venv).
 
-As of **2026-07-23**, media-sampler3 **replaced the legacy `image-sampler2`** as
-the live `hummingcam` image producer on H00F (the "great cut-over") — feeding the
-sage-yolo2 detector → sage-bioclip2 species-classifier cascade from the shared
-`/local-cache`. Confirmed drop-in: identical `<ts>-v2-<vsn>-<name>.jpg` naming,
+As of **2026-07-23**, media-sampler3 **replaced the prior image producer** as the
+live image producer on H00F (the "great cut-over") — feeding the
+sage-yolo2 detector → sage-bioclip2 species-classifier cascade (an example
+consumer pipeline, here used for bird detection) from the shared `/local-cache`.
+Confirmed drop-in: identical `<ts>-v2-<vsn>-<name>.jpg` naming,
 4K EXIF-tagged JPEGs, and yolo2 consumes ms3 frames with cloud `env.count.*`
-publish. If the node reboots, follow the recovery runbook:
-`../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md`.
+publish. If the node reboots, follow the recovery runbook (see the
+sage-design-planning reboot/recovery stack doc).
 
 - **Image capture** (inherited from imagesampler v0.5.1, fully proven): single
   real capture, capture-time v2 naming + self-describing EXIF/JSON embed, one-shot
@@ -164,7 +165,7 @@ attributes the node via routing regardless.
 ## Provenance of the baseline
 
 - Upstream: https://github.com/waggle-sensor/plugin-imagesampler
-- Forked from the enhanced `image-sampler2` at **v0.5.1** on 2026-07-15, then
+- Forked from the enhanced `imagesampler` producer at **v0.5.1** on 2026-07-15, then
   generalized to media-sampler3 (image + audio). See `CHANGELOG.md` for the full
   fork + rename record.
 

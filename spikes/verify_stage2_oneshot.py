@@ -43,7 +43,7 @@ def main():
     print("captured raw:", len(raw), "bytes")
 
     final, uid = metadata.embed_all(
-        raw, vsn="H00F", node_id="00004cbb4701d16c", job="hummingbird",
+        raw, vsn="H00F", node_id="00004cbb4701d16c", job="sage",
         task="media-sampler3",
         plugin="registry.sagecontinuum.org/pete/media-sampler3:0.1.0",
         camera="top", capture_ts_ns=cap_ts, upload_ts_ns=None,

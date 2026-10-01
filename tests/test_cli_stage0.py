@@ -200,7 +200,7 @@ def test_continuous_bad_cache_name_rejected(tmp_path, bad_name):
 
 
 @pytest.mark.parametrize("ok_name", [
-    "hummingcam", "top_camera", "cam-1", "cam.2", "H00F_top",
+    "camera", "top_camera", "cam-1", "cam.2", "H00F_top",
 ])
 def test_continuous_good_cache_name_ok(tmp_path, ok_name):
     args = validate(["--continuous", "10", "--stream", "a",

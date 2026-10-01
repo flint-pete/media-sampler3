@@ -18,33 +18,33 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
   full cascade ran overnight with media-sampler3 as the image producer and
   produced real science: pods all Running 0 restarts after 12h (no reboot);
   sage-yolo2 detected live birds (`env.count.bird`, annotated uploads, crops into
-  `hummingcam-crops`); the new sage-bioclip2 (BioCLIP-2.5) classified the crops as
-  **_Archilochus colubris_ (Ruby-throated Hummingbird)** at 89–100% confidence and
+  `camera-crops`); the new sage-bioclip2 (BioCLIP-2.5) classified the crops as
+  a correctly-identified test bird species (an example QA target) at 89–100% confidence and
   published `env.species.species` to Beehive with full provenance
   (`common_name`, `source_class`, `source_confidence`, `source_unique_id` tracing
   each species call back through the yolo detection to the parent ms3 frame).
-  media-sampler3 is a proven drop-in replacement for image-sampler2.
-- **GREAT CUT-OVER A — media-sampler3 replaces image-sampler2 as the live image
+  media-sampler3 is a proven drop-in replacement for the prior image producer.
+- **GREAT CUT-OVER A — media-sampler3 replaces the prior producer as the live image
   producer on H00F (2026-07-23).** After a node reboot took the whole pipeline
-  down, brought it back up with media-sampler3 (not image-sampler2) as the
-  `hummingcam-producer`, using image-sampler2's EXACT production spec (image
+  down, brought it back up with media-sampler3 (not the prior producer) as the
+  `camera-producer`, using the prior producer's EXACT production spec (image
   swapped only; creds via `--env-from`, not inline): `--continuous 10 --media
-  image --stream top_camera --name top --cache-name hummingcam --cache-max-count
+  image --stream top_camera --name top --cache-name camera --cache-max-count
   500 --cache-max-mb 500 --heartbeat-secs 60 --vsn H00F`. Results:
-  - **Producer:** pod `hummingcam-producer` image = `localhost/media-sampler3:0.1.0`,
-    1/1 Running 0 restarts, fresh frames every 10 s into `/local-cache/hummingcam/top/`.
-  - **Structural parity with image-sampler2:** identical filename format
+  - **Producer:** pod `camera-producer` image = `localhost/media-sampler3:0.1.0`,
+    1/1 Running 0 restarts, fresh frames every 10 s into `/local-cache/camera/top/`.
+  - **Structural parity with the prior producer:** identical filename format
     `<ts>-v2-H00F-top.jpg`; valid 3840×2160 baseline JPEG; metadata in **EXIF**
-    (no per-image sidecar — matches image-sampler2 exactly; 0 `.json` / 347 `.jpg`);
+    (no per-image sidecar — matches the prior producer exactly; 0 `.json` / 347 `.jpg`);
     EXIF carries `Sage media-sampler3 v2; vsn=H00F; camera=top; job=sage`.
   - **CONFIRMED yolo2 CONSUME:** `sage-yolo2:2.1.0` read the 5 newest
     ms3-produced frames (`1784769553…`–`1784769593…`) from the shared cache,
     loaded yolo11x on CUDA, ran inference on each (seen-store advanced) — reads
-    ms3 output byte-identically to how it read image-sampler2. Crop-producer armed
-    (`hummingcam-crops`).
+    ms3 output byte-identically to how it read the prior producer. Crop-producer armed
+    (`camera-crops`).
   - **Full cascade restarted:** persistent `sage-yolo2-consumer` (--every 5m,
     crop-produce) + the NEW `sage-bioclip2-consumer` (2.0.0, BioCLIP-2.5,
-    --every 10m, reads `hummingcam-crops/top-crop-0`). All 3 stages 1/1 Running
+    --every 10m, reads `camera-crops/top-crop-0`). All 3 stages 1/1 Running
     0 restarts.
   - **pywaggle2 pieces re-shimmed post-reboot:** `wes-local-cache-manager`
     DaemonSet survived the reboot; re-added the wes-nodeinfo-injection Tier 1
@@ -64,7 +64,7 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
   downstream (plugin logs the `NODE` placeholder locally — Limiter 1 confirmed, not
   a bug). Full node→plugin→cloud path proven. Test subtree + creds cleaned up.
 - **Audio path on-node validated on H00F (2026-07-19).** Native aarch64 build +
-  k3s side-load; ran via `sudo pluginctl run` against the LIVE Reolink hummingbird
+  k3s side-load; ran via `sudo pluginctl run` against the LIVE Reolink
   camera mic (`10.107.0.221:10000`, `channel0_sub`) into the real shared
   `/media/plugin-data/local-cache`. Confirmed on hardware: valid 16 kHz mono FLAC
   clips + correct v2 sidecars; ring caps at `--cache-max-count` with oldest-first
@@ -117,26 +117,26 @@ Group entries as Added / Changed / Fixed / Removed / Deprecated / Security.
   mode). Ring counts/evicts by CLIP; sidecar rides along (sidecar-first commit).
   Source label = the `--stream`/`--name` value; recorded as `source`/`source_type`
   (mics are not cameras) with `camera` kept as a back-compat alias.
-- **Forked from image-sampler2 v0.5.1 as media-sampler3** (2026-07-15). New plugin
+- **Forked from the prior image producer (v0.5.1) as media-sampler3** (2026-07-15). New plugin
   lineage: a more versatile producer that captures BOTH JPEG frames AND audio clips
   into the shared `/local-cache` using the same v2 self-describing cache-frame
-  contract. Baseline = image-sampler2 `main`@692a2cd / v0.5.1 (46 files, unit suite
+  contract. Baseline = the prior producer `main`@692a2cd / v0.5.1 (46 files, unit suite
   170 passed / 8 skipped), copied verbatim then renamed. See
   `docs/AUDIO-EXTENSION-DESIGN.md` for the audio-producer design and locked decisions.
 
 ### Changed
-- **Renamed image-sampler2 → media-sampler3 throughout**, including published
+- **Renamed the prior producer → media-sampler3 throughout**, including published
   interfaces (clean break — no existing media-sampler3 subscribers):
   - `SCHEMA_VERSION`: `sage-img-1` → `sage-media-1` (now spans image + audio).
   - Heartbeat measurement topics: `env.imagesampler.cache.*` →
     `env.mediasampler.cache.*`.
-  - Registry image: `beckman/image-sampler2` → `beckman/media-sampler3`.
+  - Registry image: the prior `beckman/*` image → `beckman/media-sampler3`.
   - Version lineage restarts at `0.1.0`.
   Logger names, docstrings, README, job YAMLs, Dockerfile, Makefile, and file names
   (`README.md`, `docs/mediasampler.analysis.txt`, the CI workflow) updated in
   lockstep; suite re-verified green (170 passed / 8 skipped) post-rename.
 
-### Inherited from image-sampler2 v0.5.1 (baseline)
+### Inherited from the prior producer v0.5.1 (baseline)
 - **Runtime node identity from the WES-injected env vars.** `nodemeta._runtime_identity()`
   now reads the five `WAGGLE_NODE_*` env vars that the WES `wes-nodeinfo-injection`
   change projects into every plugin pod via `envFrom: wes-identity`
@@ -222,7 +222,7 @@ default 0 = unbounded (forever behavior preserved). Verified on-node against H00
     the 1s grid and self-exited 0 in ~2s. 229 tests pass.
 - Stage 3.3c: ON-NODE self-exit verification on H00F (Thor), built/imported as
   media-sampler3:0.5.0-rc. `--continuous 8 --max-runtime 30` captured 5 real
-  hummingcam frames on the 8s grid (t=0,8,16,24,32s) then CLEANLY SELF-EXITED at
+  camera frames on the 8s grid (t=0,8,16,24,32s) then CLEANLY SELF-EXITED at
   the first capture edge past the 30s bound — the pod reached a terminal completed
   state and was reaped (not killed, not crash-looped). Producer ran as a bounded,
   self-terminating burst on real hardware. Creds env-only (shredded); scheduler
@@ -262,7 +262,7 @@ loop. Ships a turnkey producer+uploader job pair. Verified on-node against H00F
     leaves the cache untouched. 214 tests pass.
 - Stage 6d: ON-NODE verification on H00F (Thor), built/imported as
   media-sampler3:0.4.0-rc. Ran the composed loop via pluginctl:
-  - PRODUCER (--continuous, live hummingcam) filled a host-mounted ring with 3
+  - PRODUCER (--continuous, live camera) filled a host-mounted ring with 3
     real ~1.3MB frames (newest capture_ts 1783384382979952981).
   - UPLOADER (--one-shot --from-cache /cache/h00f-s6/top) selected the NEWEST,
     uploaded it with NO camera contact, exit 0.
@@ -316,7 +316,7 @@ dead-camera liveness case and data-plane delivery of env.mediasampler.cache.*.
 - Stage 5d: ON-NODE verification on H00F (Thor), built/imported as
   media-sampler3:0.3.0-rc (Dockerfile now COPYs heartbeat.py). Two runs via
   `sudo pluginctl run --selector zone=core --env-from <creds> -v <host>:/cache`:
-  - HAPPY PATH (live hummingcam, interval=10s, --heartbeat-secs 15, cap=3):
+  - HAPPY PATH (live camera, interval=10s, --heartbeat-secs 15, cap=3):
     STAGE 5 beats fired on the independent 15s grid (not the 10s capture grid),
     startup beat count=0/status=none, then count climbed 0→2→3 and held at the
     cap; written/evicted deltas reset each beat. Dual-grid 1B confirmed on real
@@ -338,11 +338,11 @@ dead-camera liveness case and data-plane delivery of env.mediasampler.cache.*.
 Stage 4: `--continuous` local ring-cache producer (design 2.2 + 2.6). Adds a
 drift-free periodic capture loop that writes v2-named, EXIF-embedded frames into
 a bounded, per-stream ring on local disk. Local-only (never uploads); one plugin
-instance per camera stream. Verified on-node against the live H00F hummingcam.
+instance per camera stream. Verified on-node against the live H00F camera.
 
 ### Added
 - Stage 4d: ON-NODE verification of the `--continuous` producer on H00F (Thor)
-  against the live hummingcam (Reolink RLC-811A, 10.107.0.221:10000), via
+  against the live camera (Reolink RLC-811A, 10.107.0.221:10000), via
   `sudo pluginctl run --selector zone=core --env-from <creds> -v <host>:/cache`
   with a host-mounted cache so the ring was observable from the host over SSH.
   Params: interval=10s, --cache-max-count 3. Results (real ~1.5MB frames):
@@ -716,7 +716,7 @@ instance per camera stream. Verified on-node against the live H00F hummingcam.
   timestamp equals the supplied ns prefix 100% (gap <1ms), and genuinely
   back-dated file-forager records (~5.5h behind source; oldest 23.7h back) are
   stored and retrievable at their back-dated time. So a capture-time record
-  timestamp is safe at the data layer. (Check 2) slack-hummingbird watcher uses a
+  timestamp is safe at the data layer. (Check 2) the slack detection watcher uses a
   FIXED 120s relative lookback (safe pattern, not a max-ts cursor), so it won't
   permanently drop back-dated records; the media-sampler3 capture-time switch
   affects image-upload records (already tolerated via the 240s deferred image

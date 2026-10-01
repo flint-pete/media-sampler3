@@ -49,12 +49,12 @@ are upstream (WES). Needs the design doc filed as issues on waggle-edge-stack.
   - /media/plugin-data/local-cache exists, mode drwxrwxrwt (world-writable, sticky).
   - wes-local-cache-manager DaemonSet pod Running (10d) — the Layer-2 manager we
     spec'd is deployed.
-  - The producer/consumer loop is LIVE: image-sampler2 fills
-    /local-cache/hummingcam/top/, and sage-yolo2 + sage-bioclip2 consumers read it
-    (yolo2 writes /local-cache/hummingcam-crops/... back; .state/sage-yolo2 present).
+  - The producer/consumer loop is LIVE: media-sampler3 fills
+    /local-cache/camera/top/, and sage-yolo2 + sage-bioclip2 consumers read it
+    (yolo2 writes /local-cache/camera-crops/... back; .state/sage-yolo2 present).
   - Consumers mount it via `-v /media/plugin-data/local-cache:/local-cache`
     (hostPath volume, mountPath /local-cache). media-sampler3 uses the SAME mount and
-    writes its own subtree via --cache-name (e.g. hummingcam-audio/) alongside the
+    writes its own subtree via --cache-name (e.g. camera-audio/) alongside the
     image cache. No code change needed — the plugin was ready; the mount now exists.
 
 ----------------------------------------------------------------------------------
@@ -72,7 +72,7 @@ to test against.
 The design need is cross-user READ (a consumer running as user-A reads files a
 producer created as user-B), NOT cross-user eviction. Each producer bounds its own
 cache; consumers are strictly non-destructive readers (e.g. BirdNet reads audio,
-yolo2 reads image-sampler2 frames, BioClip reads crops). Probe: a root-owned
+yolo2 reads media-sampler3 frames, BioClip reads crops). Probe: a root-owned
 producer file (0644) in a 0755 dir under the sticky 0777 /local-cache was READ,
 its sidecar READ, its dir LISTED, and the parent TRAVERSED successfully by BOTH a
 distinct non-root user (beckman uid 2016) AND nobody (uid 65534, most-restricted).
@@ -145,12 +145,12 @@ exists), Hanwha camera support (once we have hardware), and the resize/quality
 decision. Everything else waits on Sage.
 
 ----------------------------------------------------------------------------------
-media-sampler3 PRE-PUBLISH TODO (added 2026-07-15, inherited from image-sampler2)
+media-sampler3 PRE-PUBLISH TODO (added 2026-07-15, inherited from the fork baseline)
 ----------------------------------------------------------------------------------
 Before this repo is ever pushed public, scrub the private camera LAN IP
 10.107.0.221 (appears in CHANGELOG history note, jobs/producer-continuous.yaml
 host allowlist, and tests/test_acquire_stage1.py fixture) -> placeholder
 CAMERA_IP. NOTE: the test password there is a FAKE 'pw123' (not the real cred),
-and the real SageCam! password is NOT present. Also note: the ORIGIN repo
-image-sampler2 is ALREADY PUBLIC with this same LAN IP — a pre-existing low-sev
+and the real SageCam! password is NOT present. Also note: the upstream ORIGIN repo
+this was forked from is ALREADY PUBLIC with this same LAN IP — a pre-existing low-sev
 exposure (LAN address, not a credential) tracked separately.

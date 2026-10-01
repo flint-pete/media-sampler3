@@ -21,7 +21,7 @@ import metadata
 
 RAW = b"FLAC\x00\x00\x00\x22fake-clip-bytes-for-testing" * 4
 FIELDS = dict(
-    vsn="H00F", node_id="00004cbb4701d16c", job="hummingcam",
+    vsn="H00F", node_id="00004cbb4701d16c", job="camera",
     task="media-sampler3-audio", plugin="registry/beckman/media-sampler3:0.1.0",
     source="usb_mic_0", source_type="usb_mic",
     capture_ts_ns=1_783_000_000_000_000_000, upload_ts_ns=None,

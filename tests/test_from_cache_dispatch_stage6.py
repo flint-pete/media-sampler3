@@ -18,7 +18,7 @@ piexif = pytest.importorskip("piexif")
 Image = pytest.importorskip("PIL.Image")
 
 COMMON = dict(
-    vsn="H00F", node_id="00004cbb4701d16c", job="hummingbird",
+    vsn="H00F", node_id="00004cbb4701d16c", job="sage",
     task="media-sampler3", plugin="registry.example.org/pete/media-sampler3:0.3.0",
     camera="top", upload_ts_ns=None, lat=41.7, lon=-87.9,
     acquisition_path="native-raw")

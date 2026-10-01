@@ -15,7 +15,7 @@
 # process listings, and the scheduler job record; see Infra #10). Provide them via
 # a Kubernetes Secret referenced by the pod (envFrom/secretRef). Create the Secret
 # once on the node, e.g.:
-#   kubectl create secret generic hummingcam-creds \
+#   kubectl create secret generic camera-creds \
 #     --from-literal=CAMERA_USER=sage --from-literal=CAMERA_PASSWORD='<password>'
 # (Confirm the SES pluginSpec field that maps a secretRef into the pod env for
 # your scheduler version — see Infra #10; if envFrom is unsupported, use pluginctl
@@ -43,7 +43,7 @@ plugins:
         - "--cache-root"
         - "/local-cache"             # persistent cross-consumer root (§2.12)
         - "--cache-name"
-        - "hummingcam"               # <cache-root>/hummingcam/top/ (known path)
+        - "camera"                   # <cache-root>/camera/top/ (known path, example name)
         - "--cache-max-count"
         - "120"                      # ring bound: keep newest 120 frames
         - "--heartbeat-secs"
@@ -53,12 +53,12 @@ plugins:
         - "--camera-port"
         - "10000"
         - "--job"
-        - "hummingcam"
+        - "camera"
       # Credentials come from a Secret, NOT args. Map CAMERA_USER/CAMERA_PASSWORD
       # into the pod env here (field name depends on the SES schema version):
       #   envFrom:
       #     - secretRef:
-      #         name: hummingcam-creds
+      #         name: camera-creds
       selector:
         zone: core
 nodes:

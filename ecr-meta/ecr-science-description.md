@@ -17,9 +17,10 @@ clip, an object seen in a frame.
 
 > Status: **v0.1.0.** Both media paths are verified end-to-end on a live node
 > (H00F). The **image path is in PRODUCTION** — as of 2026-07-23 media-sampler3
-> replaced the legacy `image-sampler2` as the live `hummingcam` image producer
+> replaced the prior image producer as the live image producer
 > (the "great cut-over"), feeding the sage-yolo2 detector and sage-bioclip2
-> species classifier from the shared `/local-cache`. The **audio path** is
+> species classifier (an example consumer cascade) from the shared `/local-cache`.
+> The **audio path** is
 > on-node validated (sustained-liveness + Beehive telemetry). 237 tests passing.
 > Full audio design: `docs/AUDIO-EXTENSION-DESIGN.md`.
 
@@ -202,5 +203,5 @@ continuous producer, schedule on a cron cadence):
 
 ```bash
 media-sampler3 --one-shot --stream top_camera \
-  --from-cache /local-cache/hummingcam/top_camera
+  --from-cache /local-cache/camera/top_camera
 ```

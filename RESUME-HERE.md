@@ -3,15 +3,15 @@
 **One-file pickup point.** Read this to resume cold. Last worked: 2026-07-23.
 
 > **If the node rebooted** (all pods `Unknown`/`Failed`, cache timestamps frozen),
-> the side-loaded experimental stack must be re-added by hand. Follow the runbook:
-> `../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md` — do NOT re-derive
+> the side-loaded experimental stack must be re-added by hand. Follow the runbook
+> (the sage-design-planning reboot/recovery stack doc) — do NOT re-derive
 > the steps.
 
 ---
 
 ## TL;DR — where things stand
 
-media-sampler3 = a versatile fork of image-sampler2 that captures **audio clips**
+media-sampler3 = a versatile media producer that captures **audio clips**
 (FLAC) into the shared `/local-cache` the same self-describing v2 way it captures
 JPEGs. **The audio path is code-complete, reviewed, and ON-NODE VALIDATED on H00F,
 including a full sustained-liveness + Beehive-telemetry run.**
@@ -30,7 +30,7 @@ including a full sustained-liveness + Beehive-telemetry run.**
 
 ## What was validated on H00F (2026-07-19)
 
-Ran via `sudo pluginctl run` against the **live Reolink hummingbird camera mic**
+Ran via `sudo pluginctl run` against the **live Reolink camera mic**
 (`10.107.0.221:10000`, `channel0_sub` — the SAME source BirdNet uses in production),
 writing to the **real** `/media/plugin-data/local-cache`.
 
@@ -45,7 +45,7 @@ writing to the **real** `/media/plugin-data/local-cache`.
 
 Blockers 1 (`/local-cache` mount) and 2 (cross-user read) in `readiness-gap.txt`
 are RESOLVED (both verified live — the mount + wes-local-cache-manager DaemonSet are
-deployed and the loop runs in prod: image-sampler2 → yolo2/bioclip2 consumers).
+deployed and the loop runs in prod: media-sampler3 → yolo2/bioclip2 consumers).
 
 **Known remaining limitation:** `vsn=NODE` placeholder + null GPS. This is the WES
 runtime-identity gap (Limiter 1) — identical to every other plugin; Beehive attaches
@@ -57,12 +57,12 @@ the real `vsn=H00F` downstream via routing. Not a media-sampler3 bug.
 
 One producer per media type bounds its OWN ring; consumers are **non-destructive
 readers**. Today in prod on H00F:
-- `image-sampler2` (producer) → `/local-cache/hummingcam/top/` (JPEGs)
-- `sage-yolo2` (consumer) reads those, writes crops to `hummingcam-crops/`
+- `media-sampler3` (image producer) → `/local-cache/camera/top/` (JPEGs)
+- `sage-yolo2` (consumer) reads those, writes crops to `camera-crops/`
 - `sage-bioclip2` (consumer) reads crops
 
 media-sampler3 adds the audio producer: writes its own `--cache-name` subtree
-(e.g. `hummingcam-audio/`) alongside the image cache. A future **BirdNet consumer**
+(e.g. `camera-audio/`) alongside the image cache. A future **BirdNet consumer**
 reads those clips — no extra plumbing, because cross-user read is confirmed.
 
 Cross-user *eviction* is owner-gated but by design **never needed** (a consumer
@@ -90,22 +90,22 @@ pod 1/1 Running 0 restarts for the full window; ring filled 1→20 and held at c
 (data.sagecontinuum.org) with meta `vsn=H00F`. Details in CHANGELOG [Unreleased].
 
 ### Audio producer — DEPLOYED & LIVE on H00F (2026-07-24) ✓
-A second media-sampler3 instance, `hummingcam-audio-producer`, now runs alongside
+A second media-sampler3 instance, `camera-audio-producer`, now runs alongside
 the image producer: **15 s FLAC clips once per minute** from the camera mic into
-`/local-cache/hummingcam-audio/hummingcam_mic/`. Verified: pod 1/1 Running 0
+`/local-cache/camera-audio/mic/`. Verified: pod 1/1 Running 0
 restarts; clips are FLAC 16 kHz mono exactly 15.000 s; correct v2 sidecars
 (`media_type=audio`, `source_type=camera_mic`, real SHA-256 `unique_id`); 60.0 s
 cadence on the monotonic grid; `env.mediasampler.cache.*` heartbeats reach Beehive
-(`task=hummingcam-audio-producer`). Run command + restart steps are in the reboot
-runbook (`../sage-design-planning/REBOOT-RECOVERY-hummingcam-stack.md`, step 4b).
+(`task=camera-audio-producer`). Run command + restart steps are in the reboot
+runbook (the sage-design-planning reboot/recovery stack doc, step 4b).
 
 Config: `--continuous 60 --clip-seconds 15 --media audio --source-type camera_mic
---audio-format flac --bandpass-fmax 8000 --stream hummingcam_mic --cache-name
-hummingcam-audio --cache-max-count 500 --cache-max-mb 2000`, creds (sage account)
+--audio-format flac --bandpass-fmax 8000 --stream mic --cache-name
+camera-audio --cache-max-count 500 --cache-max-mb 2000`, creds (sage account)
 via `--env-from ~/ms3-audio-creds.env`.
 
 **NEXT for the audio track:** wire a **BirdNET consumer** to read the
-`hummingcam-audio/hummingcam_mic/` ring (the whole point of the producer/consumer
+`camera-audio/mic/` ring (the whole point of the producer/consumer
 split — clips are accumulating now; add the reader when ready). Not reboot-durable
 (side-loaded `pluginctl run`) — see the runbook. A `secretRef`-based persistent
 SES deploy + registry publish stays the CI-owned future step.
@@ -127,15 +127,15 @@ chmod 600 ~/ms3-creds.env
   `readiness-gap.txt` / CHANGELOG.
 - Clean up test subtrees + creds file on the node:
   ```bash
-  sudo rm -rf /media/plugin-data/local-cache/hummingcam-audio
+  sudo rm -rf /media/plugin-data/local-cache/camera-audio
   rm -f ~/ms3-creds.env
   ```
-- Only `hummingcam` and `hummingcam-crops` should remain in `/local-cache`.
+- Only `camera` and `camera-crops` should remain in `/local-cache`.
 
 ### Later / optional (tracked in readiness-gap.txt)
 - **k8s Secret for camera-mic creds** in the deploy manifest (code already reads
   from env; this is manifest + docs only). FUTURE-ENHANCEMENT.
-- **BirdNet audio consumer** wired to read the `hummingcam-audio/` subtree.
+- **BirdNet audio consumer** wired to read the `camera-audio/` subtree.
 - **`--from-cache` audio uploader** job (mirror the image uploader pattern).
 - Runtime VSN/GPS wiring once WES exposes the calls (Limiter 1, upstream).
 - Pre-publish scrub of the inherited LAN IP `10.107.0.221` (CHANGELOG history note +
@@ -148,9 +148,9 @@ chmod 600 ~/ms3-creds.env
 ```bash
 ssh beckman@node-H00F.sage '
   rm -f ~/ms3-creds.env
-  sudo rm -rf /media/plugin-data/local-cache/hummingcam-audio*   # test subtrees only
+  sudo rm -rf /media/plugin-data/local-cache/camera-audio*   # test subtrees only
   sudo k3s kubectl get pods -A | grep ms3-audio || echo "no ms3 pods"
-  ls /media/plugin-data/local-cache/    # expect only: hummingcam  hummingcam-crops
+  ls /media/plugin-data/local-cache/    # expect only: camera  camera-crops
 '
 ```
 

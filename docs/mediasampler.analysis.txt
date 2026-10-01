@@ -1,5 +1,5 @@
 ═══════════════════════════════════════════════
-IMAGE-SAMPLER2 — DESIGN & UPSTREAM ANALYSIS
+MEDIA-SAMPLER3 — DESIGN & UPSTREAM ANALYSIS
 ═══════════════════════════════════════════════
 
 Purpose of this document
@@ -37,7 +37,7 @@ is created (see 2.6 for the authoritative definition + auto-detected default
 refers to --cache-root and the 2.6 layout; 2.6 is authoritative.
 
 Node/context facts used below
-  Target node: H00F (Thor, single GPU, hummingcam). Geo lat 41.7180, lon -87.9827.
+  Target node: H00F (Thor, single GPU, camera node). Geo lat 41.7180, lon -87.9827.
   Node hw id 00004cbb4701d16c / host ...agx-thor.
 
 
@@ -844,7 +844,7 @@ CHECK 1 — data-service honors client-supplied (back-dated) timestamps: across
 ns prefix 100% (gap < 1 ms). Genuinely back-dated file-forager records (~5.5 h
 behind source; oldest 23.7 h back) are stored and retrievable at their back-dated
 time. => capture-time record timestamps are safe at the data layer.
-CHECK 2 — slack-hummingbird watcher poll audit: it uses a FIXED 120 s relative
+CHECK 2 — slack detection watcher poll audit: it uses a FIXED 120 s relative
 lookback (safe pattern, not a max-ts cursor), so it won't permanently drop
 back-dated records. The media-sampler3 capture-time switch affects IMAGE-upload
 records (already tolerated by the watcher's 240 s deferred image queue), not the

@@ -30,7 +30,7 @@ them means:
 The uploader's `--from-cache` points at the producer's **stream dir**:
 
 ```
-<cache-root>/<cache-name>/<source>/   ==   /local-cache/hummingcam/top
+<cache-root>/<cache-name>/<source>/   ==   /local-cache/camera/top
 ```
 
 so the two jobs must agree on `--cache-root`, `--cache-name`, and `--stream`
@@ -43,8 +43,10 @@ The producer reads `CAMERA_USER` / `CAMERA_PASSWORD` from the **environment only
 Kubernetes Secret mapped into the pod env (`envFrom: secretRef`). Create the Secret
 once:
 
+(`camera` here is just an example `<cache-name>` — choose your own)
+
 ```
-kubectl create secret generic hummingcam-creds \
+kubectl create secret generic camera-creds \
   --from-literal=CAMERA_USER=sage --from-literal=CAMERA_PASSWORD='***'
 ```
 
