@@ -1,8 +1,13 @@
-# Deploying the media-sampler3 media stack on a new Thor node
+# Installing media-sampler3 (and the full media stack) on a new Sage Thor node
 
-A student-facing guide to install four custom Sage/Waggle components onto a fresh
-Jetson **Thor (AGX, ARM64)** node and validate them with the **sage-yolo2 →
-sage-bioclip2** inference cascade.
+An **end-to-end** install guide: starting from a clean, WES-provisioned Sage
+**Thor (AGX, ARM64)** node, it walks through getting **every component in the
+manifest below** installed and running — media-sampler3 (the producer),
+wes-local-cache-manager, wes-nodeinfo-injection, and pywaggle2-nodeinfo — and then
+validates the whole thing with the **sage-yolo2 → sage-bioclip2** inference cascade.
+
+Follow it top to bottom and you will have all the custom components deployed on the
+node and proven working, with nothing left to assemble by hand.
 
 This is the single place to pick up all the software, understand each piece, and
 apply it to a new node. Every command here was **ground-truthed on live Thor
@@ -12,9 +17,14 @@ yolo2 (detect + crop) → bioclip2 (species) → Beehive, with both test birds
 classified correctly (*Cardinalis cardinalis* and *Eopsaltria australis*, 100%).
 Findings from those runs are folded in below.
 
+> **What "end-to-end" covers here:** the PREREQUISITE check that the node is
+> WES-provisioned, then installing all four manifest components (Steps 1–4),
+> building the two example consumers (Step 5), and validating the live cascade
+> (Step 6). Every component in the manifest is accounted for by one of those steps.
+
 ---
 
-## The four components (with links)
+## The manifest — four components to install (with links)
 
 | # | Component | What it is | Repo | Key docs |
 |---|-----------|-----------|------|----------|
