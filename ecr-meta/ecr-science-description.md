@@ -16,13 +16,13 @@ capture the sensory context in which an inference was made — a bird detected i
 clip, an object seen in a frame.
 
 > Status: **v0.1.0.** Both media paths are verified end-to-end on a live node
-> (H00F). The **image path is in PRODUCTION** — as of 2026-07-23 media-sampler3
+> (H00F); the full image cascade was re-verified on H041 (Sep 2026). The **image path is in PRODUCTION** — as of 2026-07-23 media-sampler3
 > replaced the prior image producer as the live image producer
 > (the "great cut-over"), feeding the sage-yolo2 detector and sage-bioclip2
 > species classifier (an example consumer cascade) from the shared `/local-cache`.
 > The **audio path** is
 > on-node validated (sustained-liveness + Beehive telemetry). 237 tests passing.
-> Full audio design: `docs/AUDIO-EXTENSION-DESIGN.md`.
+> Install guide: `INSTALLING-MEDIA-SAMPLER3.md`; how it works: `docs/HOW-IT-WORKS.md`.
 
 ---
 
@@ -102,8 +102,8 @@ environment-only** (`CAMERA_USER` / `CAMERA_PASSWORD`) — never flags — so th
 not appear in process arguments, shell history, or logs (redacted in log output).
 
 - **`--camera-host HOST`** — camera IP/host (default env `CAMERA_HOST`).
-- **`--camera-port PORT`** — camera HTTP port (default env `CAMERA_PORT` or `80`;
-  Reolink is typically `10000`).
+- **`--camera-port PORT`** — camera HTTP port (default env `CAMERA_PORT` or `80`).
+  Used for both the image snapshot API and the camera-mic HTTP-FLV audio stream.
 - **`--camera-channel N`** — camera channel (default env `CAMERA_CHANNEL` or `0`).
 - **`--capture-timeout SECONDS`** — hard timeout for a single **image** still-fetch
   (default `10`). Does not apply to audio.
@@ -173,7 +173,7 @@ and a config-error exit code (`2`):
 Continuous audio from a USB mic (10 s FLAC clips, keep newest 500 or 2 GB):
 
 ```bash
-media-sampler3 --continuous 10 \
+python3 app.py --continuous 10 \
   --media audio --audio-source hw:1,0 --source-type usb_mic \
   --stream north_mic \
   --cache-max-count 500 --cache-max-mb 2000
@@ -183,9 +183,9 @@ Continuous audio from a camera mic (creds from env, 8 kHz lowpass):
 
 ```bash
 export CAMERA_USER=... CAMERA_PASSWORD=...
-media-sampler3 --continuous 30 \
+python3 app.py --continuous 30 \
   --media audio --source-type camera_mic \
-  --camera-host 10.x.x.x --camera-port 10000 --bandpass-fmax 8000 \
+  --camera-host 10.x.x.x --camera-port 80 --bandpass-fmax 8000 \
   --stream top_camera_mic --cache-max-mb 5000
 ```
 
@@ -193,7 +193,7 @@ Continuous images (keep newest 500 or 1 GB per stream):
 
 ```bash
 export CAMERA_USER=... CAMERA_PASSWORD=...
-media-sampler3 --continuous 60 \
+python3 app.py --continuous 60 \
   --stream top_camera --camera-host 10.x.x.x \
   --cache-max-count 500 --cache-max-mb 1000
 ```
@@ -202,6 +202,6 @@ Periodically upload the newest cached image (composition pattern — pair with a
 continuous producer, schedule on a cron cadence):
 
 ```bash
-media-sampler3 --one-shot --stream top_camera \
+python3 app.py --one-shot --stream top_camera \
   --from-cache /local-cache/camera/top_camera
 ```

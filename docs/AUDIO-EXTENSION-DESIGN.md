@@ -1,5 +1,13 @@
 # media-sampler3 — Audio Producer Extension (Design Note 1)
 
+> **Design record.** This note was written before the audio path was built
+> (2026-07-15). It is implemented in v0.1.0 and validated on H00F. The current
+> behaviour and flags are in [README.md](../README.md) and
+> [HOW-IT-WORKS.md](HOW-IT-WORKS.md); where this note disagrees, they win. One
+> resolved point: the camera mic is read over the Reolink **HTTP-FLV** stream on
+> the camera's HTTP port, not RTSP. Earlier notes referenced here live in
+> [history/](history/).
+
 Status: DRAFT (2026-07-15). Generalizes the media-sampler3 v0.5.1 producer to
 also capture **audio clips** into `/local-cache` using the same v2 self-describing
 cache-frame contract that images use. Additive; the image path is unchanged.
@@ -79,7 +87,7 @@ frame = clip + its .json**. Requirements:
 
 Audio clips + sidecars must be world-readable (0644) and dirs traversable (0755)
 so a consumer pod running as a different user can read them — the same open item
-from media-sampler3's readiness-gap Blocker 2. `capture._write_tmp_fsync` already
+from media-sampler3's readiness-gap Blocker 2 (history/readiness-gap.txt; since resolved). `capture._write_tmp_fsync` already
 writes 0644; verify the sidecar + ring dirs match. Resolve the probe here since we
 now have a live `/local-cache` on H00F to test against.
 

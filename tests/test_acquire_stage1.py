@@ -40,11 +40,11 @@ def test_looks_like_jpeg_false(bad):
 # ---------------------------------------------------------------------------
 
 def test_build_url_has_snap_and_auth():
-    url = acquire.build_reolink_snap_url("10.107.0.221", 10000, "admin", "pw123")
+    url = acquire.build_reolink_snap_url("192.0.2.10", 10000, "admin", "pw123")
     assert "cmd=Snap" in url
     assert "user=admin" in url
     assert "password=pw123" in url
-    assert url.startswith("http://10.107.0.221:10000/cgi-bin/api.cgi")
+    assert url.startswith("http://192.0.2.10:10000/cgi-bin/api.cgi")
 
 
 def test_build_url_does_not_percent_encode_password_punctuation():

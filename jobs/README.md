@@ -1,6 +1,14 @@
-# media-sampler3 example jobs
+# media-sampler3 example jobs (SES templates)
 
-Ready-to-run job manifests for the producer/consumer split (design §2.1/§2.8).
+> **Status: untested SES templates.** The verified way to run media-sampler3 today
+> is `sudo pluginctl run` with a side-loaded image —
+> [INSTALLING-MEDIA-SAMPLER3.md](../INSTALLING-MEDIA-SAMPLER3.md) Step 6b and
+> [REBOOT-RECOVERY.md](../REBOOT-RECOVERY.md). These files show the intended
+> scheduled-job shape once the image is published to the registry. Before
+> submitting one: replace `<VSN>`, add the `/local-cache` hostPath volume mount
+> your SES version supports, and confirm how it maps a Secret into the pod env.
+
+Job manifests for the producer/consumer split.
 
 | Job | Mode | Role |
 |-----|------|------|
@@ -33,8 +41,8 @@ The uploader's `--from-cache` points at the producer's **stream dir**:
 <cache-root>/<cache-name>/<source>/   ==   /local-cache/camera/top
 ```
 
-so the two jobs must agree on `--cache-root`, `--cache-name`, and `--stream`
-(`<source>` is the `--stream` label).
+so the two jobs must agree on `--cache-root`, `--cache-name`, and the source
+label (`<source>` is the producer's `--name` if given, otherwise its `--stream`).
 
 ## Credentials (producer only)
 
@@ -46,8 +54,8 @@ once:
 (`camera` here is just an example `<cache-name>` — choose your own)
 
 ```
-kubectl create secret generic camera-creds \
-  --from-literal=CAMERA_USER=sage --from-literal=CAMERA_PASSWORD='***'
+sudo k3s kubectl create secret generic camera-creds \
+  --from-literal=CAMERA_USER='<USER>' --from-literal=CAMERA_PASSWORD='<PASS>'
 ```
 
 The uploader needs **no** credentials — it never contacts the camera.

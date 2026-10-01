@@ -6,14 +6,16 @@
 #           http://www.wa8.gl
 # ANL:waggle-license
 #
-# media-sampler3 -- enhanced fork of the Sage/Waggle mediasampler.
-# See docs/mediasampler.flint.analysis.txt for the full design (section refs
-# below, e.g. "2.2", point at that document).
-#
-# STAGE 0 (this file): CLI contract + fail-fast validation only. It parses and
-# validates every flag combination and then prints the validated configuration
-# and exits 0. Acquisition, naming/EXIF, upload, the continuous ring cache, and
-# the heartbeat are added in later stages onto this validated spine.
+# media-sampler3 -- media PRODUCER for Sage/Waggle nodes (enhanced fork of the
+# Sage/Waggle imagesampler). CLI entrypoint + orchestrator: parses/validates the
+# flags, then runs one mode:
+#   --one-shot               capture one frame and queue it for Beehive upload
+#   --one-shot --from-cache  upload the newest frame already in the ring cache
+#   --continuous SECONDS     capture forever into the bounded /local-cache ring
+#                            (never uploads; publishes liveness heartbeats)
+# Module map, data flow and links to the other stack components:
+# docs/HOW-IT-WORKS.md. Design history (the "STAGE n" build-up and the "design
+# 2.x" section refs in comments): docs/history/.
 
 import argparse
 import logging
@@ -105,13 +107,17 @@ def build_parser():
     # --- source ----------------------------------------------------------------
     parser.add_argument(
         '--stream', dest='stream', action='append',
-        help='ID or name of a camera stream (e.g. top_camera) or a raw URL '
-             '(rtsp://IP:PORT/...). Repeat --stream for multiple streams; each '
-             'runs in its own worker process. REQUIRED (at least one).')
+        help='Stream id/label (e.g. top_camera, mic). A plain label, not a URL. '
+             'REQUIRED. --continuous takes exactly one stream per process; if '
+             '--name is not given, this label also names the cache subdirectory '
+             'and the <source> part of each filename.')
     parser.add_argument(
         '--name', dest='name', default=[], action='append',
-        help='(optional) Label to report for a stream. When given, the count and '
-             'order MUST match the --stream options.')
+        help='(optional) Short source label (e.g. top). When given it REPLACES '
+             '--stream as the cache subdirectory (<cache-root>/<cache-name>/<name>/), '
+             'the <source> part of each filename, and the EXIF/sidecar camera '
+             'field that consumers use (sage-yolo2 crop dirs are <name>-crop-N). '
+             'Count and order must match --stream.')
     parser.add_argument(
         '--from-cache', dest='from_cache', metavar='DIR',
         action='store', default=None, type=str,
@@ -517,10 +523,10 @@ def _one_shot_from_camera(args):
         lat=ident["lat"], lon=ident["lon"])
 
     if not ok:
-        logger.error("STAGE 3: one-shot upload failed: %s", res.get("error"))
+        logger.error("one-shot: one-shot upload failed: %s", res.get("error"))
         return EXIT_CAPTURE_ERROR
 
-    logger.info("STAGE 3: uploaded %s (%d bytes, uid=%s) capture_ts=%s "
+    logger.info("one-shot: uploaded %s (%d bytes, uid=%s) capture_ts=%s "
                 "grab=%.1fms embed=%.1fms upload=%.1fms",
                 res["object_name"], res["final_bytes"], res["unique_id"][:12],
                 res["capture_ts_ns"], res["grab_ns"] / 1e6,
@@ -754,8 +760,8 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
             return EXIT_CONFIG_ERROR
 
     if ident["vsn_is_placeholder"]:
-        logger.warning("node VSN not resolvable at runtime (sage-ci runtime VSN "
-                       "call not yet available); using PLACEHOLDER vsn=%r.",
+        logger.warning("node VSN not resolvable (no --vsn, no WAGGLE_NODE_VSN env, no "
+                       "readable /etc/waggle manifest); using PLACEHOLDER vsn=%r.",
                        ident["vsn"])
     if ident["lat"] is None or ident["lon"] is None:
         logger.warning("node GPS not resolvable at runtime; omitting EXIF GPS "
@@ -778,7 +784,7 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
         logger.error("config error: %s", e)
         return EXIT_CONFIG_ERROR
 
-    logger.info("STAGE 4: continuous -> ring %s (interval=%ds caps: count=%s mb=%s "
+    logger.info("continuous: continuous -> ring %s (interval=%ds caps: count=%s mb=%s "
                 "heartbeat=%ss)", sdir, args.continuous, args.cache_max_count,
                 args.cache_max_mb, args.heartbeat_secs or 60)
 
@@ -794,7 +800,7 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
             plugin.__enter__()
             own_plugin = True
         except Exception as e:
-            logger.warning("STAGE 5: pywaggle Plugin unavailable (%s); running "
+            logger.warning("heartbeat: pywaggle Plugin unavailable (%s); running "
                            "WITHOUT heartbeats (cache still active).", e)
             plugin = None
 
@@ -841,17 +847,17 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
         try:
             res, cap = _tick_audio() if is_audio else _tick_image()
         except (capture_mod.CaptureError, audio_acquire.CaptureError) as e:
-            logger.warning("STAGE 4: capture skipped: %s", e)
+            logger.warning("continuous: capture skipped: %s", e)
             hb.record_capture(written=False, evicted=0, status=heartbeat_mod.STATUS_SKIP)
             return
         for w in res.warnings:
-            logger.warning("STAGE 4: %s", w)
+            logger.warning("continuous: %s", w)
         evicted = len(res.evicted)
         if res.written:
             written = True
             status = heartbeat_mod.STATUS_OK
             after = cache.scan_ring(sdir)
-            logger.info("STAGE 4: wrote %s size=%d evicted=%d ring_count=%d "
+            logger.info("continuous: wrote %s size=%d evicted=%d ring_count=%d "
                         "ring_mb=%.3f", cap["final_name"], cap["final_bytes"],
                         evicted, after.count,
                         after.total_bytes / cache.BYTES_PER_MB)
@@ -863,7 +869,7 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
     def do_heartbeat(now_ns):
         ring = cache.scan_ring(sdir)
         payload = hb.snapshot_and_reset(ring.count, ring.total_bytes, now_ns)
-        logger.info("STAGE 5: heartbeat count=%d bytes=%d written=%d evicted=%d "
+        logger.info("heartbeat: heartbeat count=%d bytes=%d written=%d evicted=%d "
                     "status=%s", payload["count"], payload["bytes"],
                     payload["written"], payload["evicted"], payload["last_status"])
         if plugin is None:
@@ -880,7 +886,7 @@ def _continuous_to_cache(args, *, max_ticks=None, plugin=None,
                 plugin.publish(topic, value, timestamp=ts, meta=meta)
             except Exception as e:
                 # publishing must NEVER kill the loop (fail-soft, §3.3)
-                logger.warning("STAGE 5: heartbeat publish failed for %s: %s",
+                logger.warning("heartbeat: heartbeat publish failed for %s: %s",
                                topic, e)
 
     # Self-exit bounds (§3.3). Test harness passes max_ticks (caps captures);
@@ -933,14 +939,14 @@ def _one_shot_from_cache(args):
         return EXIT_CONFIG_ERROR
     newest = max(ring.members, key=lambda m: m.capture_ts_ns)
     path = os.path.join(d, newest.name)
-    logger.info("STAGE 6: from-cache newest=%s (of %d cached)", newest.name,
+    logger.info("from-cache: from-cache newest=%s (of %d cached)", newest.name,
                 ring.count)
 
     ok, info = upload.cache_upload(path=path)
     if not ok:
-        logger.error("STAGE 6: from-cache upload failed: %s", info.get("error"))
+        logger.error("from-cache: from-cache upload failed: %s", info.get("error"))
         return EXIT_CAPTURE_ERROR
-    logger.info("STAGE 6: uploaded %s (capture_ts=%s upload_ns=%s)",
+    logger.info("from-cache: uploaded %s (capture_ts=%s upload_ns=%s)",
                 info.get("object_name"), info.get("capture_ts_ns"),
                 info.get("upload_ns"))
     return EXIT_OK
@@ -961,7 +967,7 @@ def main(argv=None):
     # are wired; --from-cache is Stage 6.
     if args.one_shot and args.from_cache is None:
         if len(args.stream) > 1:
-            logger.warning("STAGE 3: multi-stream not wired in one-shot; capturing "
+            logger.warning("one-shot: multi-stream not wired in one-shot; capturing "
                            "the first stream only (%s)", args.stream[0])
         return _one_shot_from_camera(args)
 

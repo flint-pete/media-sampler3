@@ -31,7 +31,7 @@ including a full sustained-liveness + Beehive-telemetry run.**
 ## What was validated on H00F (2026-07-19)
 
 Ran via `sudo pluginctl run` against the **live Reolink camera mic**
-(`10.107.0.221:10000`, `channel0_sub` — the SAME source BirdNet uses in production),
+(`<CAMERA_IP>:10000`, `channel0_sub` — the SAME source BirdNet uses in production),
 writing to the **real** `/media/plugin-data/local-cache`.
 
 | Behavior | Result |
@@ -73,7 +73,7 @@ never deletes a producer's files; the producer alone bounds its ring).
 ## How to reach the node
 
 `ssh beckman@node-H00F.sage` (Thor ARM64, passwordless sudo, k3s v1.34).
-Camera is live: a snap/audio-pull from `10.107.0.221:10000` works right now.
+Camera is live: a snap/audio-pull from `<CAMERA_IP>:10000` works right now.
 
 Build tooling on the node: `docker`/`podman` 4.9.3, `k3s`, `pluginctl`.
 Podman tags images `localhost/<name>` — mind the prefix in k3s.
@@ -138,7 +138,7 @@ chmod 600 ~/ms3-creds.env
 - **BirdNet audio consumer** wired to read the `camera-audio/` subtree.
 - **`--from-cache` audio uploader** job (mirror the image uploader pattern).
 - Runtime VSN/GPS wiring once WES exposes the calls (Limiter 1, upstream).
-- Pre-publish scrub of the inherited LAN IP `10.107.0.221` (CHANGELOG history note +
+- Pre-publish scrub of the inherited LAN IP `<CAMERA_IP>` (CHANGELOG history note +
   `tests/test_acquire_stage1.py` fixture) — repo is private now; only matters before
   any public push. Real camera-password rotation is Pete's, post-validation.
 

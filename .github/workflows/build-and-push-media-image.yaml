@@ -2,7 +2,7 @@ on:
   release:
     types: [published]
   pull_request:
-    branches: ["main"]
+    branches: ["master"]
 
 jobs:
   push_to_registry:

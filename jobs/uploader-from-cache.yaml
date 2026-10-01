@@ -1,4 +1,12 @@
 # ──────────────────────────────────────────────────────────────
+# STATUS: UNTESTED SES TEMPLATE. The working, verified way to run media-sampler3
+# today is `sudo pluginctl run` with a side-loaded image (see
+# INSTALLING-MEDIA-SAMPLER3.md Step 6b and REBOOT-RECOVERY.md). These SES files
+# show the intended scheduled-job shape once the image is published to the
+# registry; before using one you must (1) replace <VSN>, (2) add the
+# /local-cache hostPath volume mount your SES version supports (the cache must be
+# mounted into the pod), and (3) confirm how your SES maps a Secret into env.
+# ──────────────────────────────────────────────────────────────
 # media-sampler3 — UPLOADER (one-shot, from-cache, scheduler cron */30)
 #
 # The "consumer/uploader" half of the producer/consumer split (§2.8). On each cron
@@ -47,7 +55,7 @@ plugins:
       selector:
         zone: core
 nodes:
-  H00F: true
+  <VSN>: true   # replace with your node VSN, e.g. H041
 scienceRules:
   - "schedule(media-sampler3-uploader): cronjob('media-sampler3-uploader', '*/30 * * * *')"
 successcriteria:

@@ -148,9 +148,9 @@ decision. Everything else waits on Sage.
 media-sampler3 PRE-PUBLISH TODO (added 2026-07-15, inherited from the fork baseline)
 ----------------------------------------------------------------------------------
 Before this repo is ever pushed public, scrub the private camera LAN IP
-10.107.0.221 (appears in CHANGELOG history note, jobs/producer-continuous.yaml
+(it appeared in a CHANGELOG history note, jobs/producer-continuous.yaml
 host allowlist, and tests/test_acquire_stage1.py fixture) -> placeholder
-CAMERA_IP. NOTE: the test password there is a FAKE 'pw123' (not the real cred),
-and the real SageCam! password is NOT present. Also note: the upstream ORIGIN repo
+CAMERA_IP. [DONE 2026-10: scrubbed from the current tree.] NOTE: the test password there is a FAKE 'pw123' (not the real cred),
+and the real camera password is NOT present. Also note: the upstream ORIGIN repo
 this was forked from is ALREADY PUBLIC with this same LAN IP — a pre-existing low-sev
 exposure (LAN address, not a credential) tracked separately.

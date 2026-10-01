@@ -1,18 +1,28 @@
-RELEASE?=0.0.0
-PLATFORM?=linux/amd64,linux/arm64
-IMAGE=media-sampler
+# media-sampler3 build/test helpers.
+#
+#   make test       run the unit suite (no camera/node needed)
+#   make sideload   ON A THOR NODE: native podman build + import into k3s
+#                   containerd as localhost/media-sampler3:<version>
+#                   (same as INSTALLING-MEDIA-SAMPLER3.md Step 4)
+#   make image      local docker buildx build (dev convenience)
+#
+# The version comes from sage.yaml, so the tag never drifts from the plugin record.
+
+VERSION?=$(shell sed -n 's/^version: *"\(.*\)"/\1/p' sage.yaml)
+IMAGE?=localhost/media-sampler3
 PY?=.venv-test/bin/python
 
-all: image
+all: test
 
-image:
-	docker buildx build -t "waggle/plugin-$(IMAGE):$(RELEASE)" --load .
-
-push:
-	docker buildx build -t "waggle/plugin-$(IMAGE):$(RELEASE)" --platform "$(PLATFORM)" --push .
-
-# Run the unit suite in the local test venv (canonical verification command).
 test:
 	$(PY) -m pytest -q
 
-.PHONY: all image push test
+sideload:
+	sudo podman build -t "$(IMAGE):$(VERSION)" .
+	sudo podman save "$(IMAGE):$(VERSION)" | sudo k3s ctr images import -
+	sudo k3s ctr images ls | grep "media-sampler3:$(VERSION)"
+
+image:
+	docker buildx build -t "$(IMAGE):$(VERSION)" --load .
+
+.PHONY: all test sideload image

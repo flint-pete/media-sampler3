@@ -7,7 +7,7 @@ JSON and the ImageUniqueID tag.
 
 Run ON the node (camera is only reachable there), inside a venv with piexif+pillow:
 
-    export CAMERA_HOST=10.107.0.221 CAMERA_PORT=10000 CAMERA_USER=admin
+    export CAMERA_HOST=<CAMERA_IP> CAMERA_PORT=10000 CAMERA_USER=admin
     read -r CAMERA_PASSWORD; export CAMERA_PASSWORD   # paste, don't echo
     python3 spikes/verify_stage2_oneshot.py
 

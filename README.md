@@ -1,185 +1,196 @@
 # media-sampler3
 
-A versatile media **producer** for Sage/Waggle edge nodes. It captures **JPEG
-still images** and **audio clips** from a node's cameras and microphones and
-either uploads them to the cloud or maintains a bounded local **ring cache** that
-other plugins (inference, triggered uploaders) consume on their own schedule.
+The media **producer** for Sage/Waggle edge nodes. It captures **JPEG stills**
+and **audio clips** from a node's cameras and microphones into a bounded ring in
+the node's shared `/local-cache`. Other plugins (detectors, classifiers,
+uploaders) then read those files on their own schedule. Every file describes
+itself: capture time, node, source, and a SHA-256 hash travel with it.
 
-Enhanced fork of the Sage/Waggle **imagesampler** plugin
-(`waggle-sensor/plugin-imagesampler`), generalized from images-only to a
-multi-media producer built around one self-describing **v2 cache-frame contract**.
+It is the hub of a six-component media stack:
+
+| Start here | |
+|---|---|
+| [INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) | Install the whole stack on a Thor node and validate it end to end |
+| [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | What each component does, why, and how they connect; includes this repo's code map |
+| [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md) | **After a node reboot:** bring the stack back up (it is side-loaded and not reboot-durable) |
+| [DESIGN-PATH.md](DESIGN-PATH.md) | How each component's design evolved; links to `docs/history/` |
+
+Related repos:
+
+- [wes-local-cache-manager](https://github.com/flint-pete/wes-local-cache-manager) bounds `/local-cache`
+- [wes-nodeinfo-injection](https://github.com/flint-pete/wes-nodeinfo-injection) and [pywaggle2-nodeinfo](https://github.com/flint-pete/pywaggle2-nodeinfo) provide node identity
+- [sage-yolo2](https://github.com/flint-pete/sage-yolo2) → [sage-bioclip2](https://github.com/flint-pete/sage-bioclip2) are the example consumers
 
 ## Status
 
-**v0.1.0 — image AND audio paths built, tested, and verified on H00F. Image path
-is IN PRODUCTION.** 237 tests passing (8 image tests skip offline: no PIL in the
-test venv).
-
-As of **2026-07-23**, media-sampler3 **replaced the prior image producer** as the
-live image producer on H00F (the "great cut-over") — feeding the
-sage-yolo2 detector → sage-bioclip2 species-classifier cascade (an example
-consumer pipeline, here used for bird detection) from the shared `/local-cache`.
-Confirmed drop-in: identical `<ts>-v2-<vsn>-<name>.jpg` naming,
-4K EXIF-tagged JPEGs, and yolo2 consumes ms3 frames with cloud `env.count.*`
-publish. If the node reboots, follow the recovery runbook (see the
-sage-design-planning reboot/recovery stack doc).
-
-- **Image capture** (inherited from imagesampler v0.5.1, fully proven): single
-  real capture, capture-time v2 naming + self-describing EXIF/JSON embed, one-shot
-  upload to Beehive, `--continuous` ring cache, cache heartbeat/liveness,
-  `--from-cache` uploader, and self-exit bounds for GPU time-sharing.
-- **Audio capture** (new in media-sampler3): bounded FLAC/WAV clips captured via
-  ffmpeg into the same ring, each with a `<clip>.json` metadata sidecar.
-  **On-node validated on H00F 2026-07-19** — live Reolink camera-mic capture,
-  ring cap + oldest-first eviction, heartbeat on its own grid, and cross-user
-  cache reads all confirmed on real aarch64 hardware. See `RESUME-HERE.md` for the
-  full validation record and the remaining deployment step (Step 4).
-
-The producer/consumer loop uses the shared `/local-cache` node cache provided by
-the `wes-local-cache-manager` WES component; if that mount is absent the plugin
-**fails fast** rather than writing to an ephemeral path no consumer can read.
-
-Full audio design: `docs/AUDIO-EXTENSION-DESIGN.md`. Original code study:
-`docs/mediasampler.analysis.txt`.
+**v0.1.0.** The image path has been in production on H00F since 2026-07-23. The
+full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
+cameras in Sep 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
+once a minute). `make test`: 237 passed, 8 skipped (the skipped image tests need
+PIL, which the test venv doesn't have).
 
 ## Core concepts
 
-**Media type.** The producer captures one media type per process, selected with
-`--media {image,audio}` (default `image`, fully back-compatible). One plugin
-instance = one stream (one camera OR one mic); run a separate job per stream.
+**One process captures one stream.** `--media image` (the default) or
+`--media audio`, from one camera or one mic. Run one pod per stream.
 
-**The v2 cache-frame contract.** Every captured artifact is *self-describing* and
-named at capture time:
-
-```
-<capture_ts_ns>-v2-<vsn>-<source>.<ext>
-```
-
-- `capture_ts_ns` — node wall-clock nanoseconds at capture (orders the ring, no
-  `stat` needed).
-- `vsn` — the node's VSN (e.g. `H00F`).
-- `source` — the stream label (a camera name for images, a mic label for audio).
-- `<ext>` — `.jpg` (image), `.flac` / `.wav` (audio).
-
-**How provenance travels with the artifact** — the whole field set (schema,
-identity, job/task, timestamps, GPS, a SHA-256 of the original bytes, etc.) is
-carried *with* every frame so a downstream consumer needs no external database:
-
-| Media | Carrier | Detail |
-|-------|---------|--------|
-| Image | **EXIF**, in the JPEG itself | standard tags + a full JSON blob in `UserComment`; `unique_id` in `ImageUniqueID`. No pixel re-encode. |
-| Audio | **Sidecar JSON**, `<clip>.json` next to the clip | same field set (audio has no EXIF). Format-agnostic; readable by any JSON parser. |
-
-For audio, one logical frame = **clip + its sidecar**. The ring counts and evicts
-by the clip; on write it publishes the **sidecar first, then the clip**, so a
-consumer that sees a clip is guaranteed its sidecar already exists.
-
-**Audio source fields.** A mic is not a camera, so audio frames carry:
-`media_type` (`image`/`audio`), `source` (the stream label), and `source_type`
-(`camera_still | camera_mic | usb_mic | rtsp_audio | file`). `camera` is retained
-as an alias of `source` so legacy image consumers keep working unchanged.
-
-## Modes (exactly one is required)
+**Two modes; exactly one is required:**
 
 | Mode | What it does |
 |------|--------------|
-| `--one-shot` | Capture **one** frame, queue it for cloud upload, exit. Upload-only — never writes the cache. Cadence is external (the scheduler relaunches the pod). |
-| `--continuous SECONDS` | Run forever, capturing every `SECONDS`. **Local-only** — writes each frame into the ring cache and **never uploads**. This is the producer that fills the shared cache. |
+| `--continuous SECONDS` | Run forever, capturing every `SECONDS` into the ring cache. **Never uploads frames**; publishes only liveness heartbeats (`env.mediasampler.cache.*`). This is the producer mode the stack uses. |
+| `--one-shot` | Capture one frame, queue it for Beehive upload, and exit. Never writes the cache. Add `--from-cache DIR` to upload the newest frame already in a ring instead of contacting the camera. |
 
-## Quick start
+**The v2 cache-frame contract.** Every artifact is named at capture time:
 
-**Continuous audio from a USB microphone** (10-second FLAC clips, keep the newest
-500 or 2 GB, whichever comes first):
-
-```bash
-media-sampler3 --continuous 10 \
-  --media audio --audio-source hw:1,0 --source-type usb_mic \
-  --stream north_mic \
-  --cache-max-count 500 --cache-max-mb 2000
+```
+<capture_ts_ns>-v2-<vsn>-<source>.<ext>       e.g. 1790000000000000000-v2-H041-top.jpg
 ```
 
-**Continuous audio from a camera microphone** (credentials from the environment,
-never on the command line — a bandwidth-limited 16 kHz mic gets an 8 kHz lowpass):
+It lives in `<cache-root>/<cache-name>/<source>/`, for example
+`/local-cache/camera/top/`.
+
+- `<source>` is `--name` if given, otherwise `--stream`.
+- `.jpg` for images; `.flac` or `.wav` for audio.
+
+Provenance travels with the file, so consumers need no database:
+
+| Media | Where the provenance is | Detail |
+|-------|-------------------------|--------|
+| Image | **EXIF**, inside the JPEG | standard tags plus a JSON blob in `UserComment`; `unique_id` (SHA-256 of the original bytes) in `ImageUniqueID`. Pixels are never re-encoded. |
+| Audio | **Sidecar** `<clip>.json` | the same fields (`media_type=audio`, `source`, `source_type`, …). The sidecar is written before the clip. |
+
+**The ring is bounded by the producer.** `--cache-max-count` and/or
+`--cache-max-mb` (at least one is required with `--continuous`) evict the oldest
+files first, at write time. Files appear atomically (written as `.tmp`, then
+renamed). wes-local-cache-manager is the node-wide safety net.
+
+**Refuses to start without the cache.** If `/local-cache` (or `--cache-root`)
+isn't an existing, writable directory, `--continuous` exits with code 2. Writing
+frames that no consumer could ever read would be worse than failing.
+
+## Running it
+
+On a node, media-sampler3 runs as a side-loaded image through `pluginctl`. The
+full, verified commands are in
+[INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6b. The
+image producer for one camera:
+
+```bash
+make sideload        # on the node: build + import localhost/media-sampler3:<version>
+
+sudo pluginctl run --name camera-producer --selector zone=core \
+  --env-from ~/ms3-cam-creds.env \
+  -v /media/plugin-data/local-cache:/local-cache \
+  localhost/media-sampler3:0.1.0 -- \
+  --continuous 10 --media image --stream top_camera --name top \
+  --cache-root /local-cache --cache-name camera \
+  --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 --vsn "$VSN" \
+  --camera-host <CAM_IP> --camera-port 80
+```
+
+For local development off a node (needs Python with `pywaggle` and `piexif`, a
+reachable camera, and an existing cache directory):
 
 ```bash
 export CAMERA_USER=... CAMERA_PASSWORD=...
-media-sampler3 --continuous 30 \
-  --media audio --source-type camera_mic \
-  --camera-host 10.x.x.x --camera-port 10000 \
-  --bandpass-fmax 8000 \
-  --stream top_camera_mic \
-  --cache-max-mb 5000
+mkdir -p /tmp/lc
+python3 app.py --continuous 10 --stream top --cache-root /tmp/lc --cache-name camera \
+  --cache-max-count 50 --camera-host <CAM_IP> --vsn TEST
 ```
 
-**Continuous images** (unchanged from imagesampler):
+**Audio from a camera mic.** This is the Reolink HTTP-FLV audio sub-stream on the
+camera's HTTP port, recorded with ffmpeg. Credentials come from the env:
 
 ```bash
-export CAMERA_USER=... CAMERA_PASSWORD=...
-media-sampler3 --continuous 60 \
-  --stream top_camera --camera-host 10.x.x.x \
-  --cache-max-count 1000
+... -- --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
+  --camera-host <CAM_IP> --camera-port 80 --bandpass-fmax 8000 \
+  --stream mic --cache-name camera-audio --cache-max-count 500 --cache-max-mb 2000
+```
+
+**Audio from a USB mic** (ALSA device; find it with `arecord -l`):
+
+```bash
+... -- --continuous 10 --media audio --source-type usb_mic --audio-source hw:1,0 \
+  --stream north_mic --cache-name birdaudio --cache-max-count 500
 ```
 
 ## Flags
 
-### Media & audio
-
-| Flag | Applies to | Meaning |
-|------|-----------|---------|
-| `--media {image,audio}` | both | Media type to capture. Default `image`. |
-| `--audio-source SRC` | audio | ALSA device (`hw:1,0`) or a credential-free URL (plain RTSP). **Not** needed for `--source-type camera_mic` (its URL is built from `--camera-host` + env creds). |
-| `--source-type TYPE` | audio | `camera_still \| camera_mic \| usb_mic \| rtsp_audio \| file`. Drives the ffmpeg input mode and is recorded in the sidecar. Default `usb_mic`. |
-| `--clip-seconds N` | audio | Clip duration. Defaults to the `--continuous` period, so clips tile the timeline with no gaps. |
-| `--audio-format {flac,wav}` | audio | Container/codec. Default `flac` (lossless, smaller). |
-| `--bandpass-fmax HZ` | audio | Apply a lowpass at `HZ` (Nyquist guard for bandwidth-limited mics, e.g. `8000` for a 16 kHz camera mic). Omit for none. |
-
-> **Audio timeout is automatic.** The ffmpeg subprocess ceiling is derived as
-> `clip_seconds + 15s` of grace, so a long clip is never killed before it
-> finishes. `--capture-timeout` governs the **image** still-fetch only.
-
-### Source & cache (shared)
+### Mode, source, and naming
 
 | Flag | Meaning |
 |------|---------|
-| `--stream ID` | Stream label (camera name or mic label). REQUIRED. In `--continuous`, exactly one. |
-| `--name LABEL` | Optional display label reported for a stream (defaults to the stream id). |
-| `--cache-root DIR` | Ring base dir. Defaults to `$IS2_CACHE_ROOT` → `/local-cache`. Must already exist & be writable, else fail-fast. |
-| `--cache-name NAME` | Filesystem-safe cache-instance id (defaults to the job id). |
-| `--cache-max-count N` / `--cache-max-mb MB` | Ring caps (evict oldest first). At least one is REQUIRED with `--continuous`. |
-| `--heartbeat-secs S` | Liveness-heartbeat cadence (default 60), independent of the capture interval. |
-| `--max-count N` / `--max-runtime S` | Clean self-exit bounds for windowed/GPU-shared scheduling (0 = unbounded). |
+| `--continuous SECONDS` / `--one-shot` | Mode (see above). |
+| `--stream ID` | Stream label (e.g. `top_camera`, `mic`). A plain label, not a URL. Required; exactly one with `--continuous`. Names the cache subdirectory and file `<source>` only when `--name` is omitted. |
+| `--name LABEL` | Short source label (e.g. `top`). When given, it **is** the cache subdirectory, the filename `<source>`, and the EXIF/sidecar `camera` field. sage-yolo2 names its crop dirs `<name>-crop-N`. |
+| `--from-cache DIR` | One-shot only: upload the newest cached frame from `DIR`. |
 
-### Camera connection (image, and `camera_mic` audio)
+### Cache
 
-`--camera-host` / `--camera-port` / `--camera-channel` / `--capture-timeout`.
-**Credentials are environment-only** (`CAMERA_USER` / `CAMERA_PASSWORD`) — never
-a flag, so no password appears in `ps`, shell history, or the pod spec.
+| Flag | Meaning |
+|------|---------|
+| `--cache-root DIR` | Ring base directory. Defaults to `$IS2_CACHE_ROOT`, then `/local-cache`. Must exist and be writable. |
+| `--cache-name NAME` | Cache instance name, the first directory level (e.g. `camera`). Defaults to the job id. |
+| `--cache-max-count N` / `--cache-max-mb MB` | Ring caps. At least one is required with `--continuous`. |
+| `--heartbeat-secs S` | Heartbeat interval (default 60), independent of the capture interval. |
+| `--max-count N` / `--max-runtime S` | Exit cleanly after N captures or S seconds (0 = never). Useful for bounded test runs or time-shared slots. |
 
-### Node identity / provenance
+### Camera connection (images and `camera_mic` audio)
 
-`--vsn` / `--node-id` / `--job` / `--task` / `--plugin-version` / `--lat` /
-`--lon` / `--node-manifest`. Identity is resolved at runtime from the WES-injected
-`WAGGLE_NODE_*` env vars; these flags override. Identity is never fatal — Beehive
-attributes the node via routing regardless.
+| Flag | Meaning |
+|------|---------|
+| `--camera-host HOST` | Camera IP (default env `CAMERA_HOST`). |
+| `--camera-port PORT` | Camera **HTTP** port (default env `CAMERA_PORT`, else 80). Used for both the snapshot API and the FLV audio stream. |
+| `--camera-channel N` | Camera channel (default 0). |
+| `--capture-timeout S` | Timeout for fetching an image still. |
 
-## Provenance of the baseline
+**Credentials are env-only:** `CAMERA_USER` / `CAMERA_PASSWORD`, passed via
+`pluginctl run --env-from <file>`. There's deliberately no flag for them, so a
+password never appears in `ps`, shell history, or the pod spec.
 
-- Upstream: https://github.com/waggle-sensor/plugin-imagesampler
-- Forked from the enhanced `imagesampler` producer at **v0.5.1** on 2026-07-15, then
-  generalized to media-sampler3 (image + audio). See `CHANGELOG.md` for the full
-  fork + rename record.
+### Audio
 
-## Documentation
+| Flag | Meaning |
+|------|---------|
+| `--media {image,audio}` | Media type. Default `image`. |
+| `--source-type TYPE` | `camera_mic`, `usb_mic` (default), `rtsp_audio`, `file`, or `camera_still`. Chooses the ffmpeg input and is recorded in the sidecar. |
+| `--audio-source SRC` | ALSA device (`hw:1,0`) or a credential-free URL. Not used with `camera_mic`, whose URL is built from `--camera-host` and the env credentials. |
+| `--clip-seconds N` | Clip length; defaults to the `--continuous` period, so clips tile the timeline. The ffmpeg timeout is `clip + 15 s`. |
+| `--audio-format {flac,wav}` | Default `flac`. |
+| `--bandpass-fmax HZ` | Low-pass filter (e.g. `8000` for a 16 kHz camera mic). |
 
-- `docs/AUDIO-EXTENSION-DESIGN.md` — the audio-producer design and locked decisions.
-- `docs/mediasampler.analysis.txt` — the original upstream code study.
-- `docs/IMPLEMENTATION-PLAN.md`, `docs/STAGE*-DESIGN-NOTE.md` — staged design notes.
-- `readiness-gap.txt` — what remains before deployment (on-node audio validation,
-  cross-user cache perms, pre-publish credential scrub of the inherited LAN IP).
-- `jobs/` — ready-to-run job manifests.
+### Node identity and provenance
 
-## Changelog
+`--vsn`, `--node-id`, `--lat`, `--lon`, `--job`, `--task`, `--plugin-version`,
+`--node-manifest`. Identity is resolved in this order:
 
-All improvements and design changes are recorded in `CHANGELOG.md`. After each
-change, add an entry under `[Unreleased]`; cut it under a version heading and bump
-`sage.yaml` when a version ships.
+1. flags
+2. the `WAGGLE_NODE_*` env (from wes-nodeinfo-injection)
+3. `/etc/waggle` files
+4. the placeholder `NODE`
+
+Pods launched with `pluginctl run` get neither the env nor the files, so pass
+`--vsn` (and `--lat`/`--lon` if you want GPS in EXIF). Details:
+[docs/HOW-IT-WORKS.md §4](docs/HOW-IT-WORKS.md#4-node-identity-where-vsn-and-gps-come-from).
+
+## Repository layout
+
+| Path | What |
+|------|------|
+| `*.py` (root) | The plugin. Module map in [docs/HOW-IT-WORKS.md §6](docs/HOW-IT-WORKS.md#6-media-sampler3-code-map). |
+| `tests/` | Unit tests (`make test`; no camera or node needed). |
+| `Dockerfile`, `Makefile` | Image build (`make sideload` on a node). |
+| `sage.yaml`, `ecr-meta/` | Plugin record and ECR catalog metadata. |
+| `jobs/` | **Untested** SES job templates for when the image is published. The verified path today is `pluginctl run`. |
+| `docs/AUDIO-EXTENSION-DESIGN.md` | Audio design and decisions (still current). |
+| `docs/history/` | Design history: stage notes, dated status, the full development log. |
+
+## Provenance and changelog
+
+- Upstream: https://github.com/waggle-sensor/plugin-imagesampler. Forked from the
+  enhanced imagesampler ("image-sampler2") at v0.5.1, then generalized to image
+  and audio. See [DESIGN-PATH.md](DESIGN-PATH.md).
+- Changes: [CHANGELOG.md](CHANGELOG.md). Add an entry under `[Unreleased]` with
+  each change; bump `sage.yaml` when a version ships.
+- Contact: Pete Beckman, pete.beckman@northwestern.edu

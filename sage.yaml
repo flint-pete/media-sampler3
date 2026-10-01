@@ -6,21 +6,23 @@ authors: "Pete Beckman <pete.beckman@northwestern.edu>"
 collaborators: "Waggle Team <https://wa8.gl>"
 funding:
 license: "The license agreed by Argonne National Laboratory"
-keywords: "image, sampling, camera, periodic sampling, trigger-based sampling, exif, provenance"
-homepage: "https://github.com/flint-pete/media-sampler3/blob/main/ecr-meta/ecr-science-description.md"
+keywords: "image, audio, sampling, camera, microphone, producer, local cache, ring buffer, exif, provenance"
+homepage: "https://github.com/flint-pete/media-sampler3/blob/master/ecr-meta/ecr-science-description.md"
 source:
   architectures:
     - "linux/arm64"
     - "linux/amd64"
   url: "https://github.com/flint-pete/media-sampler3.git"
-  branch: "main"
+  branch: "master"
 # NOTE on credentials: camera credentials are read from the environment
 # (CAMERA_USER / CAMERA_PASSWORD) ONLY -- never as args -- to keep them out of
 # argv/process listings/scheduler records. Inject them via a Kubernetes Secret
 # referenced by the job's pod spec (envFrom/secretRef), not as inputs here.
 #
-# NOTE on node identity: vsn / node_id / lat / lon auto-resolve from the on-node
-# /etc/waggle/node-manifest-v2.json, so they are OPTIONAL overrides below.
+# NOTE on node identity: vsn / node_id / lat / lon resolve at runtime from the
+# WAGGLE_NODE_* env (wes-nodeinfo-injection), then a readable
+# /etc/waggle/node-manifest-v2.json, else a placeholder. Pods started with
+# `pluginctl run` get neither, so pass --vsn (and --lat/--lon for EXIF GPS).
 inputs:
   - id: "one-shot"
     type: "boolean"
@@ -28,7 +30,21 @@ inputs:
     type: "int"
   - id: "stream"
     type: "string"
-  - id: "camera-name"
+  - id: "name"
+    type: "string"
+  - id: "media"
+    type: "string"
+  - id: "audio-source"
+    type: "string"
+  - id: "source-type"
+    type: "string"
+  - id: "clip-seconds"
+    type: "int"
+  - id: "audio-format"
+    type: "string"
+  - id: "bandpass-fmax"
+    type: "int"
+  - id: "node-manifest"
     type: "string"
   - id: "camera-host"
     type: "string"

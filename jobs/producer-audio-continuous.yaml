@@ -1,4 +1,12 @@
 # ──────────────────────────────────────────────────────────────
+# STATUS: UNTESTED SES TEMPLATE. The working, verified way to run media-sampler3
+# today is `sudo pluginctl run` with a side-loaded image (see
+# INSTALLING-MEDIA-SAMPLER3.md Step 6b and REBOOT-RECOVERY.md). These SES files
+# show the intended scheduled-job shape once the image is published to the
+# registry; before using one you must (1) replace <VSN>, (2) add the
+# /local-cache hostPath volume mount your SES version supports (the cache must be
+# mounted into the pod), and (3) confirm how your SES maps a Secret into env.
+# ──────────────────────────────────────────────────────────────
 # media-sampler3 — AUDIO PRODUCER (continuous local ring cache)
 #
 # Records bounded FLAC clips from a microphone into a per-stream local ring cache,
@@ -14,7 +22,7 @@
 #
 #   2) Camera microphone (Reolink FLV audio sub-stream):
 #        --media audio --source-type camera_mic
-#        --camera-host <ip> --camera-port 10000
+#        --camera-host <ip> --camera-port 80   # camera HTTP port
 #      NO --audio-source: the URL is built internally from --camera-host + the
 #      env credentials (CAMERA_USER / CAMERA_PASSWORD), so NO password ever appears
 #      in args/argv. Provide creds via a Secret exactly like the image producer.
@@ -22,7 +30,7 @@
 #
 # CACHE LOCATION: --cache-root defaults to /local-cache (fail-fast if the mount is
 # absent — no silent fallback). The per-stream ring lives at
-# /local-cache/<cache-name>/<stream>/ ; agree on cache-name + stream with consumers.
+# /local-cache/<cache-name>/<name or stream>/ ; agree on cache-name + name with consumers.
 #
 # Submit (with a write-scoped token):
 #   sesctl --server https://es.sagecontinuum.org --token "$SES_USER_TOKEN" create -f jobs/producer-audio-continuous.yaml
@@ -59,7 +67,7 @@ plugins:
       selector:
         zone: core
 nodes:
-  H00F: true
+  <VSN>: true   # replace with your node VSN, e.g. H041
 scienceRules:
   # Keep the producer running (it loops forever; restart if it exits).
   - "schedule(media-sampler3-audio-producer): cronjob('media-sampler3-audio-producer', '@reboot')"

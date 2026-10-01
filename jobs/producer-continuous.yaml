@@ -1,4 +1,12 @@
 # ──────────────────────────────────────────────────────────────
+# STATUS: UNTESTED SES TEMPLATE. The working, verified way to run media-sampler3
+# today is `sudo pluginctl run` with a side-loaded image (see
+# INSTALLING-MEDIA-SAMPLER3.md Step 6b and REBOOT-RECOVERY.md). These SES files
+# show the intended scheduled-job shape once the image is published to the
+# registry; before using one you must (1) replace <VSN>, (2) add the
+# /local-cache hostPath volume mount your SES version supports (the cache must be
+# mounted into the pod), and (3) confirm how your SES maps a Secret into env.
+# ──────────────────────────────────────────────────────────────
 # media-sampler3 — PRODUCER (continuous local ring cache)
 #
 # Fills a bounded, per-stream local ring cache with capture-time-named, EXIF-
@@ -39,7 +47,7 @@ plugins:
         - "--continuous"
         - "60"                       # capture every 60s onto the ring
         - "--stream"
-        - "top"                      # ONE stream per process (§2.6/a1)
+        - "top"                      # ONE stream per process; also the subdir name (no --name given)
         - "--cache-root"
         - "/local-cache"             # persistent cross-consumer root (§2.12)
         - "--cache-name"
@@ -51,7 +59,7 @@ plugins:
         - "--camera-host"
         - "CAMERA_IP_HERE"           # set to your camera's LAN IP (no secrets in git)
         - "--camera-port"
-        - "10000"
+        - "80"                       # camera HTTP port (Reolink default 80)
         - "--job"
         - "camera"
       # Credentials come from a Secret, NOT args. Map CAMERA_USER/CAMERA_PASSWORD
@@ -62,7 +70,7 @@ plugins:
       selector:
         zone: core
 nodes:
-  H00F: true
+  <VSN>: true   # replace with your node VSN, e.g. H041
 scienceRules:
   # Keep the producer running (it loops forever; restart if it exits).
   - "schedule(media-sampler3-producer): cronjob('media-sampler3-producer', '@reboot')"
