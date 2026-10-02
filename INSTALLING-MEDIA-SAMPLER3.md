@@ -16,36 +16,12 @@ Every command here was run on live Thor nodes:
   Beehive. The live-camera step (6h) is next.
 - H038 was the first attempt (see the prerequisite note).
 
-> **BIG CAVEAT: on most Thor nodes, no plugin gets the GPU.** The stack works, but
-> sage-yolo2 and sage-bioclip2 run on the **CPU**: same results, slower (YOLO11x
-> about 2 s per frame). (bioclip2 would stay on the CPU even with the fix below,
-> because it never asks for the GPU; see Step 6d.)
->
-> - **What a pod needs.** It sees the Thor GPU only if containerd starts it with
->   NVIDIA's runtime (`nvidia-container-runtime`).
-> - **What actually happens.** The default runtime on these nodes is plain `runc`.
->   Neither `pluginctl` nor the scheduler asks for NVIDIA's runtime, and the nodes
->   have no Kubernetes GPU device plugin. So the GPU request in a CUDA image
->   (`NVIDIA_VISIBLE_DEVICES=all`) is ignored, and PyTorch falls back to the CPU
->   without any error.
-> - **Survey, Oct 2026.** H01A, H038, H039, H041 and H043 all default to `runc`.
->   On H039 and H041 the live yolo2 pods were checked: handler = default, no
->   `/dev/nv*`, `torch.cuda.is_available()` = False.
-> - **The exception is H00F.** It has a hand-made
->   `/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl` (dated
->   2026-04-03). In it, the `runtimes.runc.options` section sets
->   `BinaryName = "/usr/bin/nvidia-container-runtime"`, so every pod's default
->   runtime is NVIDIA's and GPU plugins run `on cuda`.
->
-> **The fix is a node-config or platform decision for the Sage CI team.** Don't
-> change k3s's containerd config on a shared node yourself. There are two options:
->
-> - make NVIDIA's runtime the default (H00F's approach, or the k3s
->   `default-runtime: nvidia` setting);
-> - have `pluginctl` and the scheduler request the `nvidia` runtime for GPU
->   plugins.
->
-> This affects every GPU plugin on these nodes, not just this stack. To check a
+> **GPU.** Thor nodes run pods with NVIDIA's container runtime by default: the
+> Sage CI team set k3s `default-runtime: nvidia` across the fleet in Oct 2026. So a
+> CUDA plugin launched with `pluginctl` or the scheduler sees the Thor GPU with no
+> extra flags. Verified on H039: sage-yolo2 logs `on cuda`, and `/dev/nvidia*` and
+> `torch.cuda.is_available()` = True are visible inside the pod. sage-bioclip2 is
+> the exception, because its code never asks for the GPU (Step 6d). To check a
 > consumer, see Step 6c, "Is it using the GPU?".
 
 **Three companion documents in this repo:**
@@ -526,8 +502,11 @@ sudo k3s kubectl logs sage-yolo2-consumer | grep 'Loading yolo11x.pt on'
 #   "... on cpu"   -> CPU
 ```
 
-On H039 and H041 it says `on cpu` (see the caveat at the top of this guide). The
-results are the same, only slower; YOLO11x took about 2 s per frame on the CPU.
+On H039 it says `on cuda` (Oct 2026, after the fleet-wide NVIDIA-runtime fix).
+If it says `on cpu`, the pod can't see the GPU. Check that the node's k3s config
+has `default-runtime: nvidia` (`sudo grep default-runtime /etc/rancher/k3s/config.yaml`),
+and ask the Sage CI team if it's missing. The results are the same on the CPU,
+just slower (YOLO11x took about 2 s per frame).
 
 ### 6d. Run sage-bioclip2 (species classifier)
 
@@ -550,8 +529,10 @@ Good to know:
 - **One bioclip2 reads one crop directory**, so only the first bird in each frame
   (`top-crop-0`) is classified. Run one bioclip2 per `top-crop-N` to cover more;
   teaching bioclip2 to read all of them is an open improvement.
-- It **always runs on the CPU**: it never passes a device to pybioclip, whose
-  default is `cpu` (an open improvement).
+- It **always runs on the CPU**, even though the pod can see the GPU. It never
+  passes a device to pybioclip, whose default is `cpu`. On H039 the same crop
+  took 1.86 s on the CPU and 0.12 s on CUDA, with the same result, so this is an
+  open improvement.
 - It needs no internet access. The model is baked into the image and loaded
   offline (`HF_HUB_OFFLINE=1`; see "Sage adjustments" in sage-bioclip2's README).
 
@@ -742,9 +723,7 @@ and consumers with the same commands as Step 6.
 
 ## Known limitations and open items
 
-- **No GPU on Thor nodes other than H00F** (see the caveat at the top). sage-yolo2
-  runs on the CPU there; sage-bioclip2 runs on the CPU on every node. The fix
-  belongs to the Sage CI team.
+- **sage-bioclip2 runs on the CPU** because of its code, not the node (Step 6d).
 - The stack is side-loaded, so it isn't reboot-durable (see REBOOT-RECOVERY.md).
   The lasting fix is publishing the images to the registry and folding the
   nodeinfo change (ConfigMap generator, patched scheduler and `pluginctl`) into

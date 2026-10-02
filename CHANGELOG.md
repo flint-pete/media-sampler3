@@ -15,6 +15,14 @@ preserved in
 
 ## [Unreleased]
 
+### Fixed
+- **GPU:** removed the "no plugin gets the GPU" caveat. The Sage CI team set k3s
+  `default-runtime: nvidia` fleet-wide (Oct 2026). On H039, H041 and H00F the
+  containerd config now has `default_runtime_name = "nvidia"`. On H039,
+  sage-yolo2 runs `on cuda`, with `/dev/nvidia*` and `torch.cuda` = True in the
+  pod. 6c says how to check, and 6d records that bioclip2 is still CPU-only
+  because of its own code (1.86 s vs 0.12 s per crop when CUDA is requested).
+
 ### Verified
 - **REBOOT-RECOVERY.md followed after a real reboot (H039, Oct 2026).**
   - Survived: all side-loaded images, the 5-var `wes-identity`,
