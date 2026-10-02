@@ -25,6 +25,12 @@ Fixes from following the install guide from scratch on a fresh node (H039, Oct 2
   is given, but the producer exits 2 without it.
 
 ### Added (install guide)
+- Tier 1b: launch plugins with the patched `pluginctl-nodeinfo`
+  (wes-nodeinfo-injection `install-pluginctl-nodeinfo.sh`), so `pluginctl` pods get
+  `wes-identity` like SES jobs do. New `$PCTL` convention; every launch in the guide
+  and in REBOOT-RECOVERY is `sudo $PCTL run`. Also: a passwordless-sudo prerequisite,
+  a note that `--env-from` credentials end up in the pod spec, and two 6f re-run
+  surprises (identical crops are deduped; records carry the capture time).
 - A caveat at the top of the guide: on Thor nodes other than H00F, no plugin gets
   the GPU. The default containerd runtime is plain runc, and nothing requests
   NVIDIA's runtime. Survey: H01A, H038, H039, H041, H043. H00F's hand-made

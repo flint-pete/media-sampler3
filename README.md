@@ -171,8 +171,10 @@ password never appears in `ps`, shell history, or the pod spec.
 3. `/etc/waggle` files
 4. the placeholder `NODE`
 
-Pods launched with `pluginctl run` get neither the env nor the files, so pass
-`--vsn` (and `--lat`/`--lon` if you want GPS in EXIF). Details:
+Pods launched with the stock `pluginctl run` get neither the env nor the files,
+so pass `--vsn` (and `--lat`/`--lon` if you want GPS in EXIF). If you launch with
+the patched `pluginctl-nodeinfo` (wes-nodeinfo-injection Tier 1b), the env is
+there, and no identity flags are needed. Details:
 [docs/HOW-IT-WORKS.md §4](docs/HOW-IT-WORKS.md#4-node-identity-where-vsn-and-gps-come-from).
 
 ## Repository layout

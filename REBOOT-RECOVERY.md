@@ -32,6 +32,7 @@ path.
 | wes-local-cache-manager DaemonSet | restarts on its own **if its image survived** | check 1/1; if `ImagePullBackOff`, re-run its add script |
 | `wes-identity` 5-var ConfigMap (nodeinfo Tier 1) | survived on H041, but earlier H00F notes saw it revert. Any WES reinstall or `update-stack.sh` run **does** reset it | check; re-apply if the GPS vars are missing |
 | Patched edge-scheduler (nodeinfo Tier 2, only if you installed it) | the Deployment patch survives; the pod works **only if its image survived** | check; if `ImagePullBackOff`, restore stock or re-add |
+| Tier 1b `~/bin/pluginctl-nodeinfo` | survives (a file in your home directory) | nothing; it reads the ConfigMap fresh at every launch, so step 4 matters |
 | Producer and consumer pods (`pluginctl run`) | **gone** (the listing shows stale `Unknown`/`Failed` entries) | delete stale entries, relaunch |
 
 **How to recognize a reboot.** Every plugin pod shows `Unknown` or `Failed`, and
@@ -48,6 +49,7 @@ ssh <user>@node-<VSN>.sage
 VSN=$(cat /etc/waggle/vsn); echo $VSN
 CAM1_IP=<CAM1_IP>        # top camera   (non-secret; keep these in your notes)
 CAM2_IP=<CAM2_IP>        # side camera  (omit if you have one camera)
+PCTL=~/bin/pluginctl-nodeinfo   # Tier 1b; use PCTL=pluginctl if you didn't install it
 
 uptime                                    # low uptime => it was a reboot
 sudo k3s kubectl get nodes                # expect Ready
@@ -114,8 +116,8 @@ export KUBECTL="sudo k3s kubectl"
 ```
 
 The cascade below keeps working even if you skip this step, because the producer
-gets `--vsn`. But do it anyway, so the node is back in the state the install
-guide describes.
+gets `--vsn`. But do it anyway. With Tier 1b, a missing GPS here means plugins
+silently lose their node GPS fallback.
 
 ## 5. Check the patched scheduler (nodeinfo Tier 2), only if you installed it
 
@@ -167,7 +169,7 @@ Start the producers before the consumers. `pluginctl run` stays attached, so eac
 launch ends with `&`.
 
 ```bash
-sudo pluginctl run --name camera-producer --selector zone=core \
+sudo $PCTL run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
@@ -176,7 +178,7 @@ sudo pluginctl run --name camera-producer --selector zone=core \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 --vsn "$VSN" \
   --camera-host "$CAM1_IP" --camera-port 80 &
 
-sudo pluginctl run --name camera-producer-side --selector zone=core \
+sudo $PCTL run --name camera-producer-side --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
@@ -186,7 +188,7 @@ sudo pluginctl run --name camera-producer-side --selector zone=core \
   --camera-host "$CAM2_IP" --camera-port 80 &
 
 # Optional: audio producer (only if you ran it before)
-# sudo pluginctl run --name camera-audio-producer --selector zone=core \
+# sudo $PCTL run --name camera-audio-producer --selector zone=core \
 #   --env-from ~/ms3-cam-creds.env -v /media/plugin-data/local-cache:/local-cache \
 #   localhost/media-sampler3:0.1.0 -- \
 #   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
@@ -207,7 +209,7 @@ sleep 30; sudo ls -lt /media/plugin-data/local-cache/camera/top/ | head -3
 ## 9. Relaunch the consumers (sage-yolo2, then sage-bioclip2)
 
 ```bash
-sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
+sudo $PCTL run --name sage-yolo2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-yolo2 \
@@ -217,7 +219,7 @@ sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
   --model yolo11x.pt --conf-thres 0.25 --classes bird \
   --crop-match "bird:0.4" --crop-padding 0.15 --crop-cache-name camera-crops &
 
-sudo pluginctl run --name sage-bioclip2-consumer --selector zone=core \
+sudo $PCTL run --name sage-bioclip2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-bioclip2 \
