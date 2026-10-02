@@ -133,10 +133,12 @@ that cost.
     bypasses Tier 2. That's why the producer passes `--vsn`.
   - **Tier 1b (H039, Oct 2026).** The same pod-builder code is compiled into
     `pluginctl`, so the Tier 2 build already contains a patched `pluginctl`.
-    Installing it as `~/bin/pluginctl-nodeinfo` gives hand-launched pods the same
-    `envFrom` that SES jobs get. That's one user-owned file, with no WES object
+    Installing it as `/usr/local/bin/pluginctl-nodeinfo` gives hand-launched pods the same
+    `envFrom` that SES jobs get. That's one file, with no WES object
     changed and no scheduler swap. Verified end to end: the node's GPS reached the
-    yolo2 crops and the Beehive records (`location_source: node`).
+    yolo2 crops and the Beehive records (`location_source: node`). It became the
+    single launch path in the install guide; `--vsn` and the scheduler swap left
+    the main path.
 - **Details:** that repo's `README.md`, `HANDOFF.md`, `CHANGELOG.md`, and
   `docs/history/`, plus the RFC
   [pywaggle2-design.md](https://github.com/flint-pete/sage-design-planning/blob/master/pywaggle2-design.md).

@@ -15,6 +15,22 @@ preserved in
 
 ## [Unreleased]
 
+### Changed (install guide simplified to one path)
+- Launch everything with `sudo pluginctl-nodeinfo run`, the patched `pluginctl`
+  installed to `/usr/local/bin` in Step 3. It's a normal install step, so the
+  `$PCTL` choice is gone, and the producer commands no longer pass `--vsn`.
+- Step 2 is the `wes-identity` ConfigMap and Step 3 the patched `pluginctl`. The
+  patched-scheduler swap (Tier 2) moved out of the guide, to wes-nodeinfo-injection's
+  docs; REBOOT-RECOVERY only mentions it in an "if you installed it" note.
+- Step 6 is one sequence: producer check, seed the bird, yolo2, bioclip2, verify,
+  remove the seed, then the live camera (6g). One camera in the main path, with a
+  short "more cameras" note. The seeded test is now 6b–6f, and the live producer
+  moved from 6b to 6g.
+- Removed `export KUBECTL=...` and the old `__ABSENT__` warning (the scripts
+  auto-detect `kubectl`, which exists on these nodes as a link to k3s), the
+  separate "create /local-cache" step (the cache-manager script creates it), the
+  tag-checkout option, and the per-build `--dry-run`.
+
 Fixes from following the install guide from scratch on a fresh node (H039, Oct 2026).
 
 ### Fixed

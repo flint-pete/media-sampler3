@@ -124,8 +124,9 @@ Three possible sources, from strongest to weakest:
 2. **The pod environment.** `WAGGLE_NODE_VSN`, `_ID`, `_GPS_LAT`, `_GPS_LON`,
    `_MOBILITY`, from the `wes-identity` ConfigMap. They're present only when the
    pod spec has `envFrom: wes-identity`. Two things add that:
-   - the Tier 2 patched scheduler, for SES jobs;
-   - the Tier 1b patched `pluginctl-nodeinfo`, for hand-launched pods.
+   - `pluginctl-nodeinfo` (install Step 3), for hand-launched pods; this is what
+     the stack uses;
+   - the patched WES scheduler (wes-nodeinfo-injection "Tier 2"), for SES jobs.
 
    **Pods from the stock `pluginctl run` don't get them**, because the stock
    binary builds pods itself, with unpatched code.
@@ -138,8 +139,8 @@ Missing GPS is left out; it is never made up.
 How each component uses identity:
 
 - **media-sampler3** (`nodemeta.py`) resolves identity once at startup and writes
-  it into every frame's EXIF. In this stack it's launched with `--vsn`, which is
-  redundant when Tier 1b supplies the env.
+  it into every frame's EXIF. In this stack it gets identity from the pod env;
+  no flags.
 - **sage-yolo2 / sage-bioclip2** trust the **frame's EXIF identity** first, so a
   result is attributed to the node that captured the frame. They use the pod env
   (through the copied-in pywaggle2 `node_info.py`) only for missing fields and to

@@ -72,21 +72,22 @@ frames that no consumer could ever read would be worse than failing.
 
 ## Running it
 
-On a node, media-sampler3 runs as a side-loaded image through `pluginctl`. The
-full, verified commands are in
-[INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6b. The
+On a node, media-sampler3 runs as a side-loaded image, launched with
+`pluginctl-nodeinfo` (the patched `pluginctl` from install Step 3, so the pod gets
+the node's VSN and GPS). The full, verified commands are in
+[INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6g. The
 image producer for one camera:
 
 ```bash
 make sideload        # on the node: build + import localhost/media-sampler3:<version>
 
-sudo pluginctl run --name camera-producer --selector zone=core \
+sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
   localhost/media-sampler3:0.1.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
-  --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 --vsn "$VSN" \
+  --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
   --camera-host <CAM_IP> --camera-port 80
 ```
 
@@ -171,10 +172,10 @@ password never appears in `ps`, shell history, or the pod spec.
 3. `/etc/waggle` files
 4. the placeholder `NODE`
 
-Pods launched with the stock `pluginctl run` get neither the env nor the files,
-so pass `--vsn` (and `--lat`/`--lon` if you want GPS in EXIF). If you launch with
-the patched `pluginctl-nodeinfo` (wes-nodeinfo-injection Tier 1b), the env is
-there, and no identity flags are needed. Details:
+Launched with `pluginctl-nodeinfo` (install Step 3), the pod has the env, so no
+identity flags are needed; use them only to override. A pod from the stock
+`pluginctl` gets neither the env nor the files and would record VSN `NODE`, so
+there you'd pass `--vsn` (and `--lat`/`--lon` for GPS). Details:
 [docs/HOW-IT-WORKS.md §4](docs/HOW-IT-WORKS.md#4-node-identity-where-vsn-and-gps-come-from).
 
 ## Repository layout
