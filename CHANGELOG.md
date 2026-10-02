@@ -20,8 +20,8 @@ preserved in
   `default-runtime: nvidia` fleet-wide (Oct 2026). On H039, H041 and H00F the
   containerd config now has `default_runtime_name = "nvidia"`. On H039,
   sage-yolo2 runs `on cuda`, with `/dev/nvidia*` and `torch.cuda` = True in the
-  pod. 6c says how to check, and 6d records that bioclip2 is still CPU-only
-  because of its own code (1.86 s vs 0.12 s per crop when CUDA is requested).
+  pod. 6c says how to check. sage-bioclip2 now requests the GPU too (its own
+  fix), going from 1.86 s to 0.12 s per crop.
 
 ### Verified
 - **REBOOT-RECOVERY.md followed after a real reboot (H039, Oct 2026).**

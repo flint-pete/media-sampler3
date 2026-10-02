@@ -20,9 +20,8 @@ Every command here was run on live Thor nodes:
 > Sage CI team set k3s `default-runtime: nvidia` across the fleet in Oct 2026. So a
 > CUDA plugin launched with `pluginctl` or the scheduler sees the Thor GPU with no
 > extra flags. Verified on H039: sage-yolo2 logs `on cuda`, and `/dev/nvidia*` and
-> `torch.cuda.is_available()` = True are visible inside the pod. sage-bioclip2 is
-> the exception, because its code never asks for the GPU (Step 6d). To check a
-> consumer, see Step 6c, "Is it using the GPU?".
+> `torch.cuda.is_available()` = True are visible inside the pod, and sage-bioclip2
+> logs `on cuda` too. To check a consumer, see Step 6c, "Is it using the GPU?".
 
 **Three companion documents in this repo:**
 
@@ -529,10 +528,9 @@ Good to know:
 - **One bioclip2 reads one crop directory**, so only the first bird in each frame
   (`top-crop-0`) is classified. Run one bioclip2 per `top-crop-N` to cover more;
   teaching bioclip2 to read all of them is an open improvement.
-- It **always runs on the CPU**, even though the pod can see the GPU. It never
-  passes a device to pybioclip, whose default is `cpu`. On H039 the same crop
-  took 1.86 s on the CPU and 0.12 s on CUDA, with the same result, so this is an
-  open improvement.
+- It runs on the GPU when the pod can see one. Check with
+  `sudo k3s kubectl logs sage-bioclip2-consumer | grep 'classifier loaded on'`.
+  On H039 a crop took 0.12 s on CUDA vs 1.86 s on the CPU, with the same result.
 - It needs no internet access. The model is baked into the image and loaded
   offline (`HF_HUB_OFFLINE=1`; see "Sage adjustments" in sage-bioclip2's README).
 
@@ -723,7 +721,6 @@ and consumers with the same commands as Step 6.
 
 ## Known limitations and open items
 
-- **sage-bioclip2 runs on the CPU** because of its code, not the node (Step 6d).
 - The stack is side-loaded, so it isn't reboot-durable (see REBOOT-RECOVERY.md).
   The lasting fix is publishing the images to the registry and folding the
   nodeinfo change (ConfigMap generator, patched scheduler and `pluginctl`) into
