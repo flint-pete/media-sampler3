@@ -612,8 +612,10 @@ australis*. On H039 the bluebird clip came back as **`Sialia sialis`** in three
 Two things that surprise people when re-running this test:
 
 - **Re-seeding the same image doesn't re-trigger bioclip2.** yolo2 crops it again,
-  but the crop is byte-identical, so it has the same `unique_id`, and bioclip2's
-  seen-store skips it. Use a different bird image to see bioclip2 fire again.
+  but the crop has the same pixels, so it has the same `unique_id` (a hash of the
+  crop), and bioclip2's seen-store skips it, even after a reboot. Appending bytes
+  to the file doesn't help. Use a different bird image, or a mirrored copy
+  (`ImageOps.mirror`, see REBOOT-RECOVERY.md step 9).
 - **Records carry the capture time, not the processing time.** The `q` window
   (`-30m`) must cover the item's timestamp, which is the seeded file's name.
 

@@ -28,16 +28,16 @@ recovery path.
 |-------|---------------------|--------|
 | `/media/plugin-data/local-cache` (frames, crops, `.state/` seen-stores) | survives (it's a host directory) | check it exists with the sticky bit |
 | Standard WES services (rabbitmq, upload-agent, scheduler, …) | restart on their own | check that they're Running |
-| Side-loaded images in containerd | **usually** survive (they did through H041's power cut), but not guaranteed | check; rebuild if missing |
+| Side-loaded images in containerd | **usually** survive (they did through H041's power cut and H039's reboot), but not guaranteed | check; rebuild if missing |
 | wes-local-cache-manager DaemonSet | restarts on its own **if its image survived** | check 1/1; if `ImagePullBackOff`, re-run its add script |
-| `wes-identity` 5-var ConfigMap (install Step 2) | survived on H041, but earlier H00F notes saw it revert. Any WES reinstall or `update-stack.sh` run **does** reset it | check; re-apply if the GPS vars are missing |
+| `wes-identity` 5-var ConfigMap (install Step 2) | survived on H041 and H039, but earlier H00F notes saw it revert. Any WES reinstall or `update-stack.sh` run **does** reset it | check; re-apply if the GPS vars are missing |
 | `/usr/local/bin/pluginctl-nodeinfo` (install Step 3) | survives (a file on disk) | check it's there; it reads the ConfigMap fresh at every launch |
-| Producer and consumer pods | **gone** (the listing shows stale `Unknown`/`Failed` entries) | delete stale entries, relaunch |
+| Producer and consumer pods | **gone**: on H039 they vanished; on older nodes they were listed as stale `Unknown`/`Failed` | delete any stale entries, relaunch |
 
-**How to recognize a reboot.** Every plugin pod shows `Unknown` or `Failed`, and
-the newest files in the cache stopped at the same moment. Confirm with `uptime`.
-A low uptime plus stale pods means a reboot. The control plane isn't broken; k3s
-just still lists the dead pods.
+**How to recognize a reboot.** Your plugin pods are missing (or listed as
+`Unknown`/`Failed`), and the newest files in the cache all stopped at the same
+moment. Confirm with `uptime`: a low uptime means a reboot. The control plane
+isn't broken; your pods just need relaunching.
 
 ---
 
@@ -50,7 +50,9 @@ CAM_IP=<CAM_IP>          # the camera (non-secret; keep it in your notes)
 
 uptime                                    # low uptime => it was a reboot
 sudo k3s kubectl get nodes                # expect Ready
-sudo k3s kubectl get pods | grep -iE 'camera-|yolo2|bioclip2|birdnet2'   # expect Unknown/Failed
+sudo k3s kubectl get pods | grep -E 'camera-(audio-)?producer|-consumer'
+#   usually nothing: k3s drops pluginctl pods on reboot (H039, Oct 2026).
+#   If any are listed as Unknown/Failed/Error, the delete below clears them.
 
 sudo k3s kubectl delete pod camera-producer camera-audio-producer \
     sage-yolo2-consumer sage-bioclip2-consumer sage-birdnet2-consumer \
@@ -226,7 +228,7 @@ newest frames processed, add `--select-every 0 --max-frames K` with a new
 ## 9. Verify, in the cloud and not just on the node
 
 ```bash
-sudo k3s kubectl get pods | grep -iE 'camera-|yolo2-consumer|bioclip2-consumer|birdnet2-consumer'
+sudo k3s kubectl get pods | grep -E 'camera-(audio-)?producer|-consumer'
 # all Running, 0 restarts
 
 curl -s -X POST https://data.sagecontinuum.org/api/v1/query \
@@ -240,6 +242,14 @@ media-sampler3 and yolo2 to Beehive; their `meta` should include this node's
 classified. For audio, `env.detection.audio.summary` appears once per clip after
 birdnet2's next wake (up to 10 minutes); bird detections appear as
 `env.detection.biophony.<species>`.
+
+**No camera yet, or want a deterministic check?** Re-run the install guide's
+seeded test (Steps 6b–6g) on the relaunched consumers. This verified all three
+after H039's reboot (Oct 2026). One catch: bioclip2 remembers crops by a hash of
+their pixels, and that memory survives the reboot. A seed it has already
+classified is skipped, which shows the seen-store survived. To make it classify
+again, seed a visually different copy, for example a mirrored one:
+`python3 -c "from PIL import Image,ImageOps; ImageOps.mirror(Image.open('bird-cardinal-sample.jpg')).save('/tmp/c.jpg')"`.
 
 ---
 

@@ -15,6 +15,21 @@ preserved in
 
 ## [Unreleased]
 
+### Verified
+- **REBOOT-RECOVERY.md followed after a real reboot (H039, Oct 2026).**
+  - Survived: all side-loaded images, the 5-var `wes-identity`,
+    `pluginctl-nodeinfo`, the cache manager and `/local-cache` (including the
+    seen-stores).
+  - The `pluginctl` pods vanished rather than showing as `Unknown`, and the docs
+    now say so. Step 0's grep is narrowed so it no longer matches the
+    `wes-camera-provisioner` cron pods.
+  - Step 8 was run exactly as written. A seeded image and clip then reached
+    Beehive from all three consumers, with lat/lon.
+  - Added a no-camera verification note to step 9 (bioclip2 needs new pixels to
+    re-fire).
+  - Not covered: steps 5–7 (camera credentials and producers), which need a
+    camera.
+
 ### Added
 - **sage-birdnet2 is the third test consumer (audio).** It's in the components
   table and the diagram, cloned in Step 0, built in Step 5, and run in 6e, which
