@@ -552,8 +552,8 @@ Good to know:
   teaching bioclip2 to read all of them is an open improvement.
 - It **always runs on the CPU**: it never passes a device to pybioclip, whose
   default is `cpu` (an open improvement).
-- It makes a few HEAD requests to `huggingface.co` while loading the model, even
-  though the weights are baked in, so it needs outbound network access.
+- It needs no internet access. The model is baked into the image and loaded
+  offline (`HF_HUB_OFFLINE=1`; see "Sage adjustments" in sage-bioclip2's README).
 
 ### 6e. Run sage-birdnet2 (audio classifier)
 
