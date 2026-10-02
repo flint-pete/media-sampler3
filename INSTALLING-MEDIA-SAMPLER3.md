@@ -144,10 +144,10 @@ wes-nodeinfo-injection's offline unit tests.
   override for this (Step 3).
 - **Build every image from source on the node.** Don't copy prebuilt images from
   another node, and don't `pull` from the Sage registry: these images have only
-  ever been side-loaded, so a registry pull returns `not found`. A native
-  `podman build` on the Thor (arm64, no emulation) is the working path. The ECR
-  portal cannot yet cross-build the GPU/CUDA plugins (a QEMU crash on the NVIDIA
-  base image; Sage infra issue #3, open).
+  ever been side-loaded, so a registry pull returns `not found`. A native build on
+  the Thor is the path this guide uses and verifies. (The Sage ECR portal can now
+  build Thor/arm64 images, GPU/CUDA ones included, so publishing these images
+  through ECR is possible; they just haven't been published yet.)
 - **Side-loaded means not reboot-durable.** Pods started with `pluginctl run` do
   not come back after a reboot. See [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md).
 

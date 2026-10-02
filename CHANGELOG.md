@@ -41,6 +41,8 @@ shared `/local-cache`, verified end to end on H041 (Sep 2026).
   - Host Go isn't required.
   - `pluginctl` pods don't receive `wes-identity`.
   - Crop directory naming is explained, along with the known limitations.
+  - ECR wording updated: the Sage ECR portal now builds Thor images (the QEMU
+    blocker is fixed); these images simply aren't published yet.
 - `--name` / `--stream` help text now says what they actually control (the
   `--name` label names the cache subdirectory and the filename source). Log
   prefixes `STAGE n:` were renamed to the mode (`continuous:`, `heartbeat:`, …).

@@ -43,10 +43,13 @@ The umbrella design and tracking repo is
    WES prerequisite; H041 confirmed the full cascade with two cameras and showed
    that a power-cut reboot is survivable.
 
-The constant cost of this design is **side-loading**. The ECR portal couldn't
-build the images (first a `/proc/acpi` sandbox bug, since fixed for CPU images;
-the CUDA images still fail under QEMU), so everything is built on the node and
-imported by hand. That's why a reboot needs [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md).
+The constant cost of this design so far is **side-loading**. While these
+components were being built, the Sage ECR portal couldn't build Thor images
+(builder bugs since fixed by the cyberinfrastructure team), so everything was
+built on the node and imported by hand. Nothing has been published to the
+registry yet. That's why a reboot needs [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md);
+publishing the images through ECR is now possible and is the step that removes
+that cost.
 
 ---
 
