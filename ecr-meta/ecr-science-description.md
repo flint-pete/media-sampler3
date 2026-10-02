@@ -15,7 +15,7 @@ Collecting images and audio is a fundamental way to gather training data and to
 capture the sensory context in which an inference was made — a bird detected in a
 clip, an object seen in a frame.
 
-> Status: **v0.1.0.** Both media paths are verified end-to-end on a live node
+> Status: **v0.1.1.** Both media paths are verified end-to-end on a live node
 > (H00F); the full image cascade was re-verified on H041 (Sep 2026). The **image path is in PRODUCTION** — as of 2026-07-23 media-sampler3
 > replaced the prior image producer as the live image producer
 > (the "great cut-over"), feeding the sage-yolo2 detector and sage-bioclip2

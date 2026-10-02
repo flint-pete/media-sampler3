@@ -23,7 +23,7 @@ Related repos:
 
 ## Status
 
-**v0.1.0.** The image path has been in production on H00F since 2026-07-23. The
+**v0.1.1** (2026-10-02). The image path has been in production on H00F since 2026-07-23. The
 full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
 cameras in Sep 2026, and the install guide was re-run from scratch on H039 (no
 cameras) in Oct 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
@@ -85,7 +85,7 @@ make sideload        # on the node: build + import localhost/media-sampler3:<ver
 sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.0 -- \
+  localhost/media-sampler3:0.1.1 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \

@@ -1,6 +1,6 @@
 name: "media-sampler3"
 description: "Versatile media sampler: capture-time naming, self-describing EXIF/JSON provenance, dual upload+local-cache, fleet-portable node identity. Captures JPEG frames AND audio clips into the shared /local-cache (v2 cache-frame contract)."
-version: "0.1.0"
+version: "0.1.1"
 namespace: "beckman"
 authors: "Pete Beckman <pete.beckman@northwestern.edu>"
 collaborators: "Waggle Team <https://wa8.gl>"

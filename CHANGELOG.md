@@ -15,6 +15,12 @@ preserved in
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-02
+
+Image `localhost/media-sampler3:0.1.1`. The producer code is unchanged from 0.1.0;
+this release is the verified install path, plus `make test` bootstrap, reboot
+verification, birdnet2 integration and the GPU fix.
+
 ### Fixed
 - **GPU:** removed the "no plugin gets the GPU" caveat. The Sage CI team set k3s
   `default-runtime: nvidia` fleet-wide (Oct 2026). On H039, H041 and H00F the

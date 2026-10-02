@@ -58,8 +58,8 @@ Each repo's README explains its code and has a "where this fits" section that
 links back here.
 
 Step 0 clones `master` of all seven repos; that is what this guide was tested
-against. The images it builds are `localhost/media-sampler3:0.1.0`,
-`.../sage-yolo2:2.1.0`, `.../sage-bioclip2:2.0.0` and `.../sage-birdnet2:2.0.0`.
+against. The images it builds are `localhost/media-sampler3:0.1.1`,
+`.../sage-yolo2:2.1.1`, `.../sage-bioclip2:2.1.0` and `.../sage-birdnet2:2.0.1`.
 
 ---
 
@@ -341,7 +341,7 @@ This uses a CPU base image (`python:3.12-slim`) and builds in about a minute:
 
 ```bash
 cd ~/AI-projects/media-sampler3
-make sideload       # = sudo podman build -t localhost/media-sampler3:0.1.0 .
+make sideload       # = sudo podman build -t localhost/media-sampler3:0.1.1 .
                     #   + podman save | sudo k3s ctr images import -
                     #   + confirm the image is listed
 ```
@@ -373,8 +373,8 @@ Notes:
   about 7 minutes on H041 and loads the node's disk I/O (SSH may feel sluggish).
   Build bioclip2 right after yolo2 so it reuses the cached CUDA base layer.
 - sage-birdnet2 is small and CPU-only (`python:3.12-slim` + BirdNET/TensorFlow).
-- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.1.0`,
-  `.../sage-bioclip2:2.0.0` and `.../sage-birdnet2:2.0.0`. That's only the side-loaded image's *name*;
+- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.1.1`,
+  `.../sage-bioclip2:2.1.0` and `.../sage-birdnet2:2.0.1`. That's only the side-loaded image's *name*;
   nothing is pulled from the registry.
 - More detail:
   [sage-yolo2 DOCKER-BUILD](https://github.com/flint-pete/sage-yolo2/blob/master/DOCKER-BUILD.md).
@@ -413,7 +413,7 @@ umask 077; printf 'CAMERA_USER=dummy\nCAMERA_PASSWORD=dummy\n' > ~/ms3-dummy-cre
 sudo pluginctl-nodeinfo run --name ms3-smoke --selector zone=core \
   --env-from ~/ms3-dummy-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.0 -- \
+  localhost/media-sampler3:0.1.1 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name smoke \
   --cache-max-count 20 --heartbeat-secs 20 \
@@ -469,7 +469,7 @@ sudo pluginctl-nodeinfo run --name sage-yolo2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-yolo2 \
-  registry.sagecontinuum.org/beckman/sage-yolo2:2.1.0 -- \
+  registry.sagecontinuum.org/beckman/sage-yolo2:2.1.1 -- \
   --source cache --input /local-cache/camera/top \
   --every 5m --all-unseen --max-frames 0 \
   --model yolo11x.pt --conf-thres 0.25 --classes bird \
@@ -514,7 +514,7 @@ sudo pluginctl-nodeinfo run --name sage-bioclip2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-bioclip2 \
-  registry.sagecontinuum.org/beckman/sage-bioclip2:2.0.0 -- \
+  registry.sagecontinuum.org/beckman/sage-bioclip2:2.1.0 -- \
   --source cache --input /local-cache/camera-crops/top-crop-0 \
   --every 10m --all-unseen --max-frames 0 --rank Species --min-confidence 0.1 &
 ```
@@ -541,7 +541,7 @@ sudo pluginctl-nodeinfo run --name sage-birdnet2-consumer --selector zone=core \
   --resource limit.memory=2Gi,request.memory=1Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-birdnet2 \
-  registry.sagecontinuum.org/beckman/sage-birdnet2:2.0.0 -- \
+  registry.sagecontinuum.org/beckman/sage-birdnet2:2.0.1 -- \
   --source cache --input /local-cache/camera-audio/mic \
   --every 10m --all-unseen --max-frames 0 --min-confidence 0.6 &
 ```
@@ -652,7 +652,7 @@ Launch the producer:
 sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.0 -- \
+  localhost/media-sampler3:0.1.1 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -672,7 +672,7 @@ What the naming flags do:
   (`top-crop-N`).
 - `--stream` is the stream label, and it is **required**. It's used for the names
   only when `--name` is omitted.
-- Optional: `--plugin-version localhost/media-sampler3:0.1.0` records the image
+- Optional: `--plugin-version localhost/media-sampler3:0.1.1` records the image
   version in each frame (otherwise `media-sampler3:dev`).
 
 On H041 the producer wrote 3840×2160 JPEGs (240–370 KB) every 10 s.
@@ -692,7 +692,7 @@ on H00F.
 sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.0 -- \
+  localhost/media-sampler3:0.1.1 -- \
   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
   --camera-host "$CAM_IP" --camera-port 80 \
   --audio-format flac --bandpass-fmax 8000 \

@@ -42,7 +42,7 @@ name: media-sampler3-producer
 plugins:
   - name: media-sampler3-producer
     pluginSpec:
-      image: registry.sagecontinuum.org/beckman/media-sampler3:0.1.0
+      image: registry.sagecontinuum.org/beckman/media-sampler3:0.1.1
       args:
         - "--continuous"
         - "60"                       # capture every 60s onto the ring
