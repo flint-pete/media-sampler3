@@ -2,7 +2,7 @@
 
 > **Status: untested SES templates.** The verified way to run media-sampler3 today
 > is `sudo pluginctl-nodeinfo run` with a side-loaded image —
-> [INSTALLING-MEDIA-SAMPLER3.md](../INSTALLING-MEDIA-SAMPLER3.md) Step 6g and
+> [INSTALLING-MEDIA-SAMPLER3.md](../INSTALLING-MEDIA-SAMPLER3.md) Step 6h and
 > [REBOOT-RECOVERY.md](../REBOOT-RECOVERY.md). These files show the intended
 > scheduled-job shape once the image is published to the registry. Before
 > submitting one: replace `<VSN>`, add the `/local-cache` hostPath volume mount

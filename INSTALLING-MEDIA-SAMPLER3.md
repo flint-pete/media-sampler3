@@ -2,8 +2,8 @@
 
 This guide takes a clean, WES-provisioned Sage **Thor (AGX, ARM64)** node and
 installs every component of the media stack, then proves it works end to end with
-a bird-detection cascade (camera → frames → detector → crops → species classifier
-→ Beehive).
+two bird cascades: images (camera → frames → detector → crops → species
+classifier → Beehive) and audio (camera microphone → clips → BirdNET → Beehive).
 
 Every command here was run on live Thor nodes:
 
@@ -11,8 +11,9 @@ Every command here was run on live Thor nodes:
   seeded test birds were classified correctly (*Cardinalis cardinalis* and
   *Eopsaltria australis*).
 - **H039 (Oct 2026):** a fresh install, following this guide from top to bottom
-  with no cameras attached. Steps 0–5 and 6a–6f all passed, with results reaching
-  Beehive; the live-camera step (6g) is next.
+  with no cameras attached. Steps 0–5 and 6a–6g all passed, including the seeded
+  bird image and the seeded bird-song clip (*Sialia sialis*), with results reaching
+  Beehive. The live-camera step (6h) is next.
 - H038 was the first attempt (see the prerequisite note).
 
 > **BIG CAVEAT: on most Thor nodes, no plugin gets the GPU.** The stack works, but
@@ -68,20 +69,22 @@ Every command here was run on live Thor nodes:
 | 3 | **pywaggle2-nodeinfo** | The **reader** side of #2. `read_node_info()` turns those env vars into a clean `NodeInfo`. It is a library that gets copied ("vendored") into plugin images; nothing is deployed on the node. | https://github.com/flint-pete/pywaggle2-nodeinfo |
 | 4 | **media-sampler3** | The **producer**. Captures JPEG stills (and optionally FLAC audio) from a camera into `/local-cache` as a bounded ring of self-describing files. | https://github.com/flint-pete/media-sampler3 |
 
-**Two test consumers.** They exist to prove the stack works, and they are also
-working examples of how to write a cache consumer:
+**Three test consumers.** They exist to prove the stack works, and they are also
+working examples of how to write a cache consumer, two for images and one for
+audio:
 
 | Consumer | What it does | Repo |
 |----------|-------------|------|
 | **sage-yolo2** | Reads cached frames, detects objects (here, birds), publishes counts, and writes crops of each detection back into the cache. | https://github.com/flint-pete/sage-yolo2 |
 | **sage-bioclip2** | Reads yolo2's crops, classifies the species with BioCLIP-2.5, and publishes the result. | https://github.com/flint-pete/sage-bioclip2 |
+| **sage-birdnet2** | Reads media-sampler3's audio clips, identifies bird (and other) sounds with BirdNET V2.4, and publishes detections. | https://github.com/flint-pete/sage-birdnet2 |
 
 Each repo's README explains its code and has a "where this fits" section that
 links back here.
 
-Step 0 clones `master` of all six repos; that is what this guide was tested
+Step 0 clones `master` of all seven repos; that is what this guide was tested
 against. The images it builds are `localhost/media-sampler3:0.1.0`,
-`.../sage-yolo2:2.1.0` and `.../sage-bioclip2:2.0.0`.
+`.../sage-yolo2:2.1.0`, `.../sage-bioclip2:2.0.0` and `.../sage-birdnet2:2.0.0`.
 
 ---
 
@@ -104,6 +107,15 @@ camera ─▶│  media-sampler3 │──── ring ─────▶│  /lo
                                               │ classify species  │ env.species.* to Beehive
                                               └───────────────────┘
 
+        ┌─────────────────┐  writes FLAC   ┌───────────────────────────────┐
+cam mic ▶│  media-sampler3 │─(+ .json)─────▶│ /local-cache/camera-audio/mic │
+         │  --media audio  │                └───────────────┬───────────────┘
+        └─────────────────┘                                 ▼ reads
+                                              ┌───────────────────┐
+                                              │   sage-birdnet2   │ env.detection.* to Beehive
+                                              │  BirdNET (audio)  │
+                                              └───────────────────┘
+
 wes-local-cache-manager ── bounds /local-cache (byte caps, oldest-first eviction)
 wes-nodeinfo-injection  ── publishes VSN + GPS in the wes-identity ConfigMap
 pywaggle2-nodeinfo      ── the library a plugin uses to READ those values
@@ -111,11 +123,11 @@ pywaggle2-nodeinfo      ── the library a plugin uses to READ those values
 
 There are two separate data flows; keep them apart in your head:
 
-- **Cache (on the node).** media-sampler3 fills `/local-cache`. yolo2 and bioclip2
-  only read it and never delete. Each producer bounds its own ring, and the cache
+- **Cache (on the node).** media-sampler3 fills `/local-cache`. The consumers
+  only read it and never delete (yolo2 also writes its crops there). Each producer bounds its own ring, and the cache
   manager is the safety net for the whole directory.
 - **Cloud (Beehive).** The consumers publish results (`env.count.*`,
-  `env.species.*`) through WES (rabbitmq → upload-agent → Beehive). The producer
+  `env.species.*`, `env.detection.*`) through WES (rabbitmq → upload-agent → Beehive). The producer
   publishes only liveness heartbeats (`env.mediasampler.cache.*`).
 
 [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) covers paths, file naming, identity,
@@ -183,7 +195,7 @@ needed (Step 3 compiles Go inside a container).
 ```bash
 mkdir -p ~/AI-projects && cd ~/AI-projects
 for r in wes-local-cache-manager wes-nodeinfo-injection pywaggle2-nodeinfo \
-         media-sampler3 sage-yolo2 sage-bioclip2; do
+         media-sampler3 sage-yolo2 sage-bioclip2 sage-birdnet2; do
   [ -d "$r" ] || git clone https://github.com/flint-pete/$r.git
 done
 ```
@@ -315,6 +327,8 @@ What that buys you in this cascade (verified on H039):
 - **yolo2/bioclip2** attribute results with each frame's EXIF identity, and use
   the pod's identity as a cross-check and as a GPS fallback. On H039 a frame with
   no GPS still produced records with the node's lat/lon (`location_source: node`).
+- **sage-birdnet2** uses the node's GPS to restrict BirdNET to the species eBird
+  expects here and now.
 - **Beehive** attaches the VSN to every record during routing in any case.
 
 Good to know:
@@ -361,7 +375,7 @@ Flags and file contract: [README](README.md).
 
 ---
 
-## Step 5: Build the test consumers (sage-yolo2, sage-bioclip2)
+## Step 5: Build the test consumers (sage-yolo2, sage-bioclip2, sage-birdnet2)
 
 These use a GPU/CUDA base image (`nvcr.io/nvidia/pytorch:25.08-py3`) and are
 **large builds**: yolo2 is about 10 GiB and bioclip2 about 17 GiB. Check `df -h /`
@@ -373,6 +387,7 @@ its `sage.yaml`, then builds and imports (add `--dry-run` to only print the plan
 ```bash
 cd ~/AI-projects/sage-yolo2    && scripts/deploy-sideload.sh --skip-register
 cd ~/AI-projects/sage-bioclip2 && scripts/deploy-sideload.sh --skip-register
+cd ~/AI-projects/sage-birdnet2 && scripts/deploy-sideload.sh --skip-register   # CPU image, a few minutes
 ```
 
 Notes:
@@ -382,8 +397,9 @@ Notes:
 - **The import step is slow but safe.** Importing the 10 GiB yolo2 image took
   about 7 minutes on H041 and loads the node's disk I/O (SSH may feel sluggish).
   Build bioclip2 right after yolo2 so it reuses the cached CUDA base layer.
-- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.1.0`
-  and `.../sage-bioclip2:2.0.0`. That's only the side-loaded image's *name*;
+- sage-birdnet2 is small and CPU-only (`python:3.12-slim` + BirdNET/TensorFlow).
+- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.1.0`,
+  `.../sage-bioclip2:2.0.0` and `.../sage-birdnet2:2.0.0`. That's only the side-loaded image's *name*;
   nothing is pulled from the registry.
 - More detail:
   [sage-yolo2 DOCKER-BUILD](https://github.com/flint-pete/sage-yolo2/blob/master/DOCKER-BUILD.md).
@@ -393,8 +409,8 @@ Notes:
 ## Step 6: Run and validate the cascade
 
 One sequence, whether or not a camera is attached yet: check the producer (6a),
-prove the whole chain with a known bird image (6b–6f), then attach the live
-camera (6g).
+prove both chains with a known bird image and a known bird-song clip (6b–6g),
+then attach the live camera (6h).
 
 Every launch is `sudo pluginctl-nodeinfo run`, and two flags appear on every one:
 
@@ -451,17 +467,21 @@ with code 2 and a one-line reason (`sudo k3s kubectl logs <name>`):
 | `set CAMERA_USER and CAMERA_PASSWORD in the environment` | pass `--env-from <file>` (never put credentials in flags) |
 | a message about `/local-cache` not existing | add `-v /media/plugin-data/local-cache:/local-cache` |
 
-### 6b. Seed a known bird
+### 6b. Seed a known bird (image and sound)
 
-Real frames may contain no birds, and then yolo2 correctly writes zero crops and
-bioclip2 never fires. To prove the whole chain deterministically, put the bird
-image that sage-yolo2 ships as a test fixture where the producer would write,
-named like a real frame:
+Real frames and clips may contain no birds, and then the consumers correctly find
+nothing. To prove both chains deterministically, put a known bird image and a
+known bird-song clip where the producer would write them, named like real
+captures. The image is sage-yolo2's cardinal test fixture. The clip is 15 s of an
+Eastern Bluebird in the camera-mic format, from sage-birdnet2's `tests/test-audio/`
+(CC BY-SA; attribution in that folder's README):
 
 ```bash
-sudo mkdir -p /media/plugin-data/local-cache/camera/top
+sudo mkdir -p /media/plugin-data/local-cache/camera/top /media/plugin-data/local-cache/camera-audio/mic
 SEED=/media/plugin-data/local-cache/camera/top/$(date +%s%N)-v2-$VSN-top.jpg
 sudo cp ~/AI-projects/sage-yolo2/tests/test-images/bird-cardinal-sample.jpg "$SEED"
+SEED_AUDIO=/media/plugin-data/local-cache/camera-audio/mic/$(date +%s%N)-v2-$VSN-mic.flac
+sudo cp ~/AI-projects/sage-birdnet2/tests/test-audio/eastern-bluebird-XC179669.flac "$SEED_AUDIO"
 ```
 
 ### 6c. Run sage-yolo2 (detector and crop producer)
@@ -535,20 +555,59 @@ Good to know:
 - It makes a few HEAD requests to `huggingface.co` while loading the model, even
   though the weights are baked in, so it needs outbound network access.
 
-### 6e. Verify end to end
+### 6e. Run sage-birdnet2 (audio classifier)
 
 ```bash
-sudo k3s kubectl get pods | grep -iE 'yolo2-consumer|bioclip2-consumer'   # Running
+sudo pluginctl-nodeinfo run --name sage-birdnet2-consumer --selector zone=core \
+  --resource limit.memory=2Gi,request.memory=1Gi \
+  -v /media/plugin-data/local-cache:/local-cache \
+  -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-birdnet2 \
+  registry.sagecontinuum.org/beckman/sage-birdnet2:2.0.0 -- \
+  --source cache --input /local-cache/camera-audio/mic \
+  --every 10m --all-unseen --max-frames 0 --min-confidence 0.6 &
+```
+
+It classifies the seeded clip on its first wake. Its log shows the steps:
+
+```bash
+sudo k3s kubectl logs sage-birdnet2-consumer | grep -E 'Location from|Geo filter|Classified|Sialia'
+#   Location from node identity: (<lat>, <lon>)        <- node GPS, from Step 3
+#   Geo filter: 131 species expected at this location/time
+#   Classified <ts>-v2-<VSN>-mic.flac: 3 detections
+#     Sialia sialis (Eastern Bluebird): 0.9996 [0.0-3.0s] ...
+```
+
+What's different from the image consumers:
+
+- **Input:** `--input` is the audio producer's `--cache-name`/`--stream`
+  (`camera-audio`/`mic`).
+- **Metadata:** audio has no EXIF, so each clip's provenance is in a
+  `<clip>.flac.json` sidecar. The seeded clip has none, which is why the log warns
+  "no metadata sidecar". Like the seeded image, it's then processed using only its
+  filename.
+- **Location:** BirdNET restricts its species list to what eBird expects at this
+  place and week. It takes the place from the pod's node GPS (Step 3). Without it,
+  the filter is off, and you get more false positives.
+- **Runs on the CPU, with no GPU involved.** It measured about 0.5 GB of memory on
+  H039.
+
+### 6f. Verify end to end
+
+```bash
+sudo k3s kubectl get pods | grep -iE 'yolo2-consumer|bioclip2-consumer|birdnet2-consumer'   # Running
 sudo ls -R /media/plugin-data/local-cache/camera-crops/ | head          # a top-crop-0 crop
-q env.count.bird           # yolo2: value 1, meta has this node's vsn, lat, lon
-q env.species.species      # bioclip2: "Cardinalis cardinalis"
+q env.count.bird                          # yolo2: value 1, meta has this node's vsn, lat, lon
+q env.species.species                     # bioclip2: "Cardinalis cardinalis"
+q env.detection.biophony.sialia_sialis    # birdnet2: confidence, meta has common_name, lat, lon
+q env.detection.audio.summary             # birdnet2: one per clip, even with no detections
 ```
 
 On H041, and again on H039, this produced `env.count.bird = 1`, a crop under
 `camera-crops/top-crop-0/`, and then bioclip2 published **`Cardinalis
 cardinalis`** at 100% confidence, all tagged with the node's VSN (and, on H039,
 its lat/lon). A second test on H041 with an Australian robin returned *Eopsaltria
-australis*.
+australis*. On H039 the bluebird clip came back as **`Sialia sialis`** in three
+3-second windows (0.89–0.9996), and the summary listed 1 species.
 
 Two things that surprise people when re-running this test:
 
@@ -556,22 +615,22 @@ Two things that surprise people when re-running this test:
   but the crop is byte-identical, so it has the same `unique_id`, and bioclip2's
   seen-store skips it. Use a different bird image to see bioclip2 fire again.
 - **Records carry the capture time, not the processing time.** The `q` window
-  (`-30m`) must cover the frame's timestamp, which is the seeded file's name.
+  (`-30m`) must cover the item's timestamp, which is the seeded file's name.
 
-### 6f. Remove the seeded bird
+### 6g. Remove the seeded bird and clip
 
-It wasn't written by media-sampler3, so it lacks the EXIF `unique_id` that yolo2
-uses to mark a frame seen. yolo2 would reprocess it, and republish
-`env.count.bird = 1`, on every wake. (A known limitation, listed in sage-yolo2's
-README.)
+Neither was written by media-sampler3, so they lack the `unique_id` (EXIF for the
+image, sidecar for the clip) that consumers use to mark an item seen. yolo2 and
+birdnet2 would reprocess them, and republish, on every wake. (A known limitation,
+listed in the consumers' READMEs.)
 
 ```bash
-sudo rm "$SEED"      # just the seeded file; never wildcard here once real frames exist
+sudo rm "$SEED" "$SEED_AUDIO"   # just the seeded files; never wildcard here once real data exists
 ```
 
-Leave yolo2 and bioclip2 running; they pick up live frames from 6g.
+Leave the three consumers running; they pick up live frames and clips from 6h.
 
-### 6g. Attach the live camera
+### 6h. Attach the live camera
 
 **How media-sampler3 talks to a Reolink camera.** It uses the camera's **HTTP
 port** (`--camera-port`, default 80), for both images (the snapshot API,
@@ -643,10 +702,10 @@ Each new camera also needs its own yolo2 instance (`--input
 /local-cache/camera/side`, a different pod name and `WAGGLE_TASK_NAME`), or
 nothing reads its frames.
 
-**(Optional) audio producer, for the upcoming BirdNET consumer.** A second,
-independent media-sampler3 pod records a 15 s FLAC clip once a minute from the
-camera's microphone, each with a `<clip>.json` metadata sidecar. Proven on H00F;
-nothing in this cascade reads the clips yet.
+**Audio producer (feeds sage-birdnet2).** A second, independent media-sampler3
+pod records a 15 s FLAC clip once a minute from the camera's microphone, each with
+a `<clip>.flac.json` metadata sidecar that includes the node's GPS. It was proven
+on H00F.
 
 ```bash
 sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
@@ -658,7 +717,10 @@ sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
   --audio-format flac --bandpass-fmax 8000 \
   --stream mic --cache-name camera-audio \
   --cache-max-count 500 --cache-max-mb 2000 --heartbeat-secs 60 &
-# clips land in /local-cache/camera-audio/mic/
+# clips land in /local-cache/camera-audio/mic/, exactly birdnet2's --input
+
+sleep 75; sudo ls -lt /media/plugin-data/local-cache/camera-audio/mic/ | head -3   # .flac + .flac.json
+q env.detection.audio.summary        # birdnet2, after its next wake (every 10 min)
 ```
 
 > **Config convention.** Keep the non-secret camera map (IP, port, label) in your
@@ -687,8 +749,9 @@ and consumers with the same commands as Step 6.
   the WES base stack. That's CI-team work, tracked in
   [sage-design-planning](https://github.com/flint-pete/sage-design-planning).
 - bioclip2 classifies only `top-crop-0` per instance (6d).
-- Hand-seeded test frames are reprocessed on every wake (6f).
+- Hand-seeded test frames and clips are reprocessed on every wake (6g).
 - bioclip2 keeps its seen-store under `.state/sage-yolo2/...` (a quirk of the
   shared consumer code; see the sage-bioclip2 README).
 - The SES job files in `jobs/` are untested templates.
-- The audio producer has only been run on H00F.
+- The audio producer has only been run on H00F. On H039, sage-birdnet2 is verified
+  with a seeded clip; the live microphone end to end is still to do.

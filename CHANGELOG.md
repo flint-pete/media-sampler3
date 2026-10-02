@@ -15,6 +15,18 @@ preserved in
 
 ## [Unreleased]
 
+### Added
+- **sage-birdnet2 is the third test consumer (audio).** It's in the components
+  table and the diagram, cloned in Step 0, built in Step 5, and run in 6e, which
+  is new. 6b also seeds a bird-song clip (sage-birdnet2's
+  `tests/test-audio/eastern-bluebird-XC179669.flac`, CC BY-SA), 6f checks
+  `env.detection.*`, and 6g removes both seeds. In 6h the audio producer is now a
+  normal step. Re-numbered: verify 6e→6f, remove seeds 6f→6g, live camera 6g→6h.
+  REBOOT-RECOVERY relaunches the audio producer and birdnet2.
+  HOW-IT-WORKS (components, cache layout, topics) and DESIGN-PATH (a new
+  sage-birdnet2 section) are updated to match. Verified on H039 with the seeded
+  clip.
+
 ### Changed (install guide simplified to one path)
 - Launch everything with `sudo pluginctl-nodeinfo run`, the patched `pluginctl`
   installed to `/usr/local/bin` in Step 3. It's a normal install step, so the

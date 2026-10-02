@@ -23,7 +23,7 @@ The stack splits the work into a **producer** and **consumers**:
 
 ```
           one producer                 shared, bounded cache               many consumers
-camera ──▶ media-sampler3 ──writes──▶ /local-cache/<cache>/<source>/ ──reads──▶ sage-yolo2, sage-bioclip2, ...
+camera ──▶ media-sampler3 ──writes──▶ /local-cache/<cache>/<source>/ ──reads──▶ sage-yolo2, sage-bioclip2, sage-birdnet2, ...
 ```
 
 - **One producer per camera or mic** captures on a fixed schedule into a ring on
@@ -43,16 +43,17 @@ Two platform pieces make this safe to run on a real node:
 
 ---
 
-## 2. The six components and who owns what
+## 2. The seven components and who owns what
 
 | Component | Kind | Owns | Talks to |
 |-----------|------|------|----------|
 | [wes-local-cache-manager](https://github.com/flint-pete/wes-local-cache-manager) | WES DaemonSet (node service) | keeping `/media/plugin-data/local-cache` under its byte caps; never touches `.state/` | the filesystem only |
-| [wes-nodeinfo-injection](https://github.com/flint-pete/wes-nodeinfo-injection) | WES change: a ConfigMap generator plus an optional scheduler patch | the `wes-identity` ConfigMap (5 `WAGGLE_NODE_*` vars); optionally the scheduler's `envFrom` | k3s |
+| [wes-nodeinfo-injection](https://github.com/flint-pete/wes-nodeinfo-injection) | WES change: a ConfigMap generator plus a patched `pluginctl` (and an optional patched scheduler) | the `wes-identity` ConfigMap (5 `WAGGLE_NODE_*` vars); `pluginctl-nodeinfo`, whose pods get `envFrom: wes-identity` | k3s |
 | [pywaggle2-nodeinfo](https://github.com/flint-pete/pywaggle2-nodeinfo) | library (copied into plugins) | the rules for turning raw env values into a clean `NodeInfo` (sentinels become `None`, no invented GPS) | the env of whatever pod imports it |
 | **media-sampler3** (this repo) | plugin (producer) | capturing frames and clips, naming them, embedding provenance, bounding its own ring, heartbeats | camera (HTTP), `/local-cache`, Beehive (heartbeats only) |
 | [sage-yolo2](https://github.com/flint-pete/sage-yolo2) | plugin (consumer, and also a crop producer) | detection, counts, crop files, its seen-store | `/local-cache` (read frames, write crops), Beehive |
 | [sage-bioclip2](https://github.com/flint-pete/sage-bioclip2) | plugin (consumer) | species classification, its seen-store | `/local-cache` (read crops), Beehive |
+| [sage-birdnet2](https://github.com/flint-pete/sage-birdnet2) | plugin (audio consumer) | BirdNET sound classification, eBird geo filter, its seen-store | `/local-cache` (read clips + sidecars), Beehive |
 
 ---
 
@@ -70,13 +71,14 @@ different users can each write their own subtree and read everyone else's.
 ├── camera/                    <- --cache-name of the image producers
 │   ├── top/                   <- --name of producer #1 (one "unit" for the cache manager)
 │   │   └── 1790000000000000000-v2-H041-top.jpg
-│   └── side/                  <- --name of producer #2
-├── camera-audio/mic/          <- optional audio producer (clip.flac + clip.flac.json pairs)
+│   └── side/                  <- --name of a second camera's producer, if any
+├── camera-audio/mic/          <- audio producer (clip.flac + clip.flac.json pairs), read by sage-birdnet2
 ├── camera-crops/              <- written by sage-yolo2 (--crop-cache-name)
 │   ├── top-crop-0/            <- first detection in each frame of camera "top"
 │   └── top-crop-1/            <- second detection, and so on
 └── .state/                    <- consumers' seen-stores; never evicted, never delete
-    └── sage-yolo2/<consumer-id>/<cache-name>/<source>/seen
+    └── sage-yolo2/<consumer-id>/<cache-name>/<source>/seen   (all three consumers use this
+                                   prefix; a quirk of the shared consumer code)
 ```
 
 **The file contract** (shared by everything that reads the cache):
@@ -173,6 +175,8 @@ Copies that must stay in sync with the canonical code:
 | `env.crop.count` | sage-yolo2 | when crops were written |
 | annotated image upload | sage-yolo2 | frames with detections (`--upload-image`) |
 | `env.species.<rank>` (+ `.confidence`), `env.species.top5`, `.summary` | sage-bioclip2 | per crop; the top result only if ≥ `--min-confidence` |
+| `env.detection.biophony.<species>` (also `.anthrophony.*`, `.geophony.*`) | sage-birdnet2 | each 3-second window with a detection ≥ `--min-confidence`; value = confidence |
+| `env.detection.audio.summary` | sage-birdnet2 | every clip, even with no detections |
 
 Every consumer record is **frame-anchored**: its timestamp is the frame's capture
 time, and its metadata links back to the source. bioclip2's `source_unique_id` is
@@ -181,7 +185,7 @@ detection to the exact producer frame.
 
 Publishing goes through pywaggle → WES rabbitmq → upload-agent → Beehive. Query
 results with the data API (`https://data.sagecontinuum.org/api/v1/query`); see
-install Step 6e.
+install Step 6f.
 
 ---
 
@@ -218,7 +222,8 @@ and `IS2_PLACEHOLDER_VSN`.
 3. Read `app.py` `_continuous_to_cache` to see one capture tick from start to
    finish.
 4. Read sage-yolo2's README and `consumer.py` / `selection.py` / `seenstore.py`:
-   the consumer side of the same contract.
+   the consumer side of the same contract. Then sage-birdnet2's `VENDORED.md`: the
+   same consumer code plus one sidecar reader, for audio.
 5. Read wes-local-cache-manager `manager/sweeper.py` (short): the Layer-2 safety
    net.
 6. Read wes-nodeinfo-injection's README and `gen-wes-identity.sh`, then

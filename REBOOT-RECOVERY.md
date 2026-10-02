@@ -50,10 +50,10 @@ CAM_IP=<CAM_IP>          # the camera (non-secret; keep it in your notes)
 
 uptime                                    # low uptime => it was a reboot
 sudo k3s kubectl get nodes                # expect Ready
-sudo k3s kubectl get pods | grep -iE 'camera-|yolo2|bioclip2'   # expect Unknown/Failed
+sudo k3s kubectl get pods | grep -iE 'camera-|yolo2|bioclip2|birdnet2'   # expect Unknown/Failed
 
 sudo k3s kubectl delete pod camera-producer camera-audio-producer \
-    sage-yolo2-consumer sage-bioclip2-consumer \
+    sage-yolo2-consumer sage-bioclip2-consumer sage-birdnet2-consumer \
     --ignore-not-found --grace-period=0 --force
 ```
 
@@ -86,16 +86,18 @@ sudo k3s kubectl get pods -l app.kubernetes.io/name=wes-local-cache-manager
 ## 3. Check the side-loaded plugin images
 
 ```bash
-sudo k3s ctr images ls -q | grep -E 'media-sampler3|sage-yolo2|sage-bioclip2|wes-local-cache-manager'
+sudo k3s ctr images ls -q | grep -E 'media-sampler3|sage-yolo2|sage-bioclip2|sage-birdnet2|wes-local-cache-manager'
 ```
 
 Expect `localhost/media-sampler3:0.1.0`, `.../sage-yolo2:2.1.0`,
-`.../sage-bioclip2:2.0.0`, and the cache manager. Rebuild anything missing:
+`.../sage-bioclip2:2.0.0`, `.../sage-birdnet2:2.0.0`, and the cache manager.
+Rebuild anything missing:
 
 ```bash
 cd ~/AI-projects/media-sampler3 && make sideload                     # about a minute
 cd ~/AI-projects/sage-yolo2     && scripts/deploy-sideload.sh --skip-register   # long
 cd ~/AI-projects/sage-bioclip2  && scripts/deploy-sideload.sh --skip-register   # long
+cd ~/AI-projects/sage-birdnet2  && scripts/deploy-sideload.sh --skip-register   # a few minutes
 ```
 
 ## 4. Check node identity: the ConfigMap and `pluginctl-nodeinfo`
@@ -148,9 +150,9 @@ After a power cut, the camera rebooted too. A Reolink can serve its web page
 retries and recovers on its own. If it stays 404 for more than 15 minutes,
 power-cycle the camera.
 
-## 7. Relaunch the producer (media-sampler3)
+## 7. Relaunch the producers (media-sampler3: images and audio)
 
-Start the producer before the consumers. `pluginctl-nodeinfo run` stays attached,
+Start the producers before the consumers. `pluginctl-nodeinfo run` stays attached,
 so each launch ends with `&`.
 
 ```bash
@@ -163,26 +165,29 @@ sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
   --camera-host "$CAM_IP" --camera-port 80 &
 
-# Optional: audio producer (only if you ran it before)
-# sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
-#   --env-from ~/ms3-cam-creds.env -v /media/plugin-data/local-cache:/local-cache \
-#   localhost/media-sampler3:0.1.0 -- \
-#   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
-#   --camera-host "$CAM_IP" --camera-port 80 --audio-format flac --bandpass-fmax 8000 \
-#   --stream mic --cache-name camera-audio \
-#   --cache-max-count 500 --cache-max-mb 2000 --heartbeat-secs 60 &
+sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
+  --env-from ~/ms3-cam-creds.env \
+  -v /media/plugin-data/local-cache:/local-cache \
+  localhost/media-sampler3:0.1.0 -- \
+  --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
+  --camera-host "$CAM_IP" --camera-port 80 \
+  --audio-format flac --bandpass-fmax 8000 \
+  --stream mic --cache-name camera-audio \
+  --cache-max-count 500 --cache-max-mb 2000 --heartbeat-secs 60 &
 ```
 
 Keep `--cache-name`/`--name` identical to before. The consumers' `--input` paths
 depend on them.
 
-Check that fresh frames are arriving every 10 s:
+Check that fresh frames arrive every 10 s, and clips every minute:
 
 ```bash
-sleep 30; sudo ls -lt /media/plugin-data/local-cache/camera/top/ | head -3
+sleep 75
+sudo ls -lt /media/plugin-data/local-cache/camera/top/ | head -3
+sudo ls -lt /media/plugin-data/local-cache/camera-audio/mic/ | head -3
 ```
 
-## 8. Relaunch the consumers (sage-yolo2, then sage-bioclip2)
+## 8. Relaunch the consumers (sage-yolo2, sage-bioclip2, sage-birdnet2)
 
 ```bash
 sudo pluginctl-nodeinfo run --name sage-yolo2-consumer --selector zone=core \
@@ -202,6 +207,14 @@ sudo pluginctl-nodeinfo run --name sage-bioclip2-consumer --selector zone=core \
   registry.sagecontinuum.org/beckman/sage-bioclip2:2.0.0 -- \
   --source cache --input /local-cache/camera-crops/top-crop-0 \
   --every 10m --all-unseen --max-frames 0 --rank Species --min-confidence 0.1 &
+
+sudo pluginctl-nodeinfo run --name sage-birdnet2-consumer --selector zone=core \
+  --resource limit.memory=2Gi,request.memory=1Gi \
+  -v /media/plugin-data/local-cache:/local-cache \
+  -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-birdnet2 \
+  registry.sagecontinuum.org/beckman/sage-birdnet2:2.0.0 -- \
+  --source cache --input /local-cache/camera-audio/mic \
+  --every 10m --all-unseen --max-frames 0 --min-confidence 0.6 &
 ```
 
 Use the **same** `WAGGLE_JOB_NAME`/`WAGGLE_TASK_NAME` as before. Those values
@@ -213,7 +226,7 @@ newest frames processed, add `--select-every 0 --max-frames K` with a new
 ## 9. Verify, in the cloud and not just on the node
 
 ```bash
-sudo k3s kubectl get pods | grep -iE 'camera-producer|yolo2-consumer|bioclip2-consumer'
+sudo k3s kubectl get pods | grep -iE 'camera-|yolo2-consumer|bioclip2-consumer|birdnet2-consumer'
 # all Running, 0 restarts
 
 curl -s -X POST https://data.sagecontinuum.org/api/v1/query \
@@ -224,7 +237,9 @@ curl -s -X POST https://data.sagecontinuum.org/api/v1/query \
 Recent `env.count.total` rows mean frames are flowing from the camera through
 media-sampler3 and yolo2 to Beehive; their `meta` should include this node's
 `lat`/`lon`. `env.species.species` rows appear once a bird is detected and
-classified.
+classified. For audio, `env.detection.audio.summary` appears once per clip after
+birdnet2's next wake (up to 10 minutes); bird detections appear as
+`env.detection.biophony.<species>`.
 
 ---
 
@@ -234,7 +249,8 @@ Before you change anything, and after recovery, save the live specs so you never
 have to rebuild them from memory:
 
 ```bash
-for p in camera-producer sage-yolo2-consumer sage-bioclip2-consumer; do
+for p in camera-producer camera-audio-producer sage-yolo2-consumer \
+         sage-bioclip2-consumer sage-birdnet2-consumer; do
   echo "== $p"; sudo k3s kubectl get pod $p \
     -o jsonpath='{.spec.containers[0].image}{"\n"}{.spec.containers[0].args}{"\n"}' 2>/dev/null
 done

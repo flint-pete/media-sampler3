@@ -27,7 +27,8 @@ Related repos:
 full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
 cameras in Sep 2026, and the install guide was re-run from scratch on H039 (no
 cameras) in Oct 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
-once a minute). `make test` (creates its own `.venv-test` on first run): 237 passed,
+once a minute). Its consumer, [sage-birdnet2](https://github.com/flint-pete/sage-birdnet2),
+identified a seeded bird-song clip on H039 (Oct 2026). `make test` (creates its own `.venv-test` on first run): 237 passed,
 8 skipped (the skipped image tests need PIL, which the test venv doesn't have).
 
 ## Core concepts
@@ -75,7 +76,7 @@ frames that no consumer could ever read would be worse than failing.
 On a node, media-sampler3 runs as a side-loaded image, launched with
 `pluginctl-nodeinfo` (the patched `pluginctl` from install Step 3, so the pod gets
 the node's VSN and GPS). The full, verified commands are in
-[INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6g. The
+[INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6h. The
 image producer for one camera:
 
 ```bash

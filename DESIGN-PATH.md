@@ -187,3 +187,23 @@ that cost.
   - Because of the copied code, bioclip2's seen-store lives under
     `.state/sage-yolo2/`. That's a known quirk, documented in its README.
 - **Details:** that repo's `CHANGELOG.md`, `VENDORED.md`, and `docs/history/`.
+
+## sage-birdnet2 (test consumer, audio)
+
+- **Origin:** [birdnet](https://github.com/flint-pete/birdnet), a standalone BirdNET
+  V2.4 plugin that opened the microphone (or the camera's audio) itself, with an
+  eBird geo/season filter and the biophony/anthrophony/geophony topic routing.
+- **Key turns.**
+  - **Re-architected as a cache consumer** on the sage-yolo2 pattern: the copied
+    `consumer.py`/`selection.py`/`seenstore.py`, plus one addition, a reader for
+    media-sampler3's `<clip>.flac.json` sidecars (audio has no EXIF).
+  - **Location from the node.** The geo filter originally needed `--lat/--lon`.
+    With `pluginctl-nodeinfo` (H039, Oct 2026), it takes the node's GPS from the
+    pod env with no flags.
+  - **Pinned `birdnet==0.2.16`.** The first on-node build (H039) failed because
+    the unpinned dependency resolved to birdnet 1.x, which no longer pulls in
+    TensorFlow.
+  - **Verified on H039** with a seeded Eastern Bluebird clip: *Sialia sialis*
+    reached Beehive with the node's lat/lon. The live camera microphone is next.
+- **Details:** that repo's `README.md`, `DOCKER-BUILD.md`, `VENDORED.md`, and
+  `docs/history/HANDOFF.md`.
