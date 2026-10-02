@@ -190,9 +190,9 @@ that cost.
 
 ## sage-birdnet2 (test consumer, audio)
 
-- **Origin:** [birdnet](https://github.com/flint-pete/birdnet), a standalone BirdNET
-  V2.4 plugin that opened the microphone (or the camera's audio) itself, with an
-  eBird geo/season filter and the biophony/anthrophony/geophony topic routing.
+- **Origin:** an earlier, now-retired standalone BirdNET V2.4 plugin that opened
+  the microphone itself. Its classifier, eBird geo/season filter and
+  biophony/anthrophony/geophony topic routing were carried into sage-birdnet2.
 - **Key turns.**
   - **Re-architected as a cache consumer** on the sage-yolo2 pattern: the copied
     `consumer.py`/`selection.py`/`seenstore.py`, plus one addition, a reader for
