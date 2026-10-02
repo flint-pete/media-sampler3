@@ -15,6 +15,38 @@ Every command here was run on live Thor nodes:
   and the seeded-bird cascade (6f) all passed, with results reaching Beehive.
 - H038 was the first attempt (see the prerequisite note).
 
+> **BIG CAVEAT: on most Thor nodes, no plugin gets the GPU.** The stack works, but
+> sage-yolo2 and sage-bioclip2 run on the **CPU**: same results, slower (YOLO11x
+> about 2 s per frame). (bioclip2 would stay on the CPU even with the fix below,
+> because it never asks for the GPU; see Step 6d.)
+>
+> - **What a pod needs.** It sees the Thor GPU only if containerd starts it with
+>   NVIDIA's runtime (`nvidia-container-runtime`).
+> - **What actually happens.** The default runtime on these nodes is plain `runc`.
+>   Neither `pluginctl` nor the scheduler asks for NVIDIA's runtime, and the nodes
+>   have no Kubernetes GPU device plugin. So the GPU request in a CUDA image
+>   (`NVIDIA_VISIBLE_DEVICES=all`) is ignored, and PyTorch falls back to the CPU
+>   without any error.
+> - **Survey, Oct 2026.** H01A, H038, H039, H041 and H043 all default to `runc`.
+>   On H039 and H041 the live yolo2 pods were checked: handler = default, no
+>   `/dev/nv*`, `torch.cuda.is_available()` = False.
+> - **The exception is H00F.** It has a hand-made
+>   `/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl` (dated
+>   2026-04-03). In it, the `runtimes.runc.options` section sets
+>   `BinaryName = "/usr/bin/nvidia-container-runtime"`, so every pod's default
+>   runtime is NVIDIA's and GPU plugins run `on cuda`.
+>
+> **The fix is a node-config or platform decision for the Sage CI team.** Don't
+> change k3s's containerd config on a shared node yourself. There are two options:
+>
+> - make NVIDIA's runtime the default (H00F's approach, or the k3s
+>   `default-runtime: nvidia` setting);
+> - have `pluginctl` and the scheduler request the `nvidia` runtime for GPU
+>   plugins.
+>
+> This affects every GPU plugin on these nodes, not just this stack. To check a
+> consumer, see Step 6c, "Is it using the GPU?".
+
 **Three companion documents in this repo:**
 
 | Document | Read it when |
@@ -641,7 +673,7 @@ sudo k3s kubectl logs sage-yolo2-consumer | grep 'Loading yolo11x.pt on'
 #   "... on cpu"   -> CPU
 ```
 
-On H039 it says `on cpu`, and H041 has the same container-runtime setup. The results are the same, only slower; YOLO11x
+On H039 and H041 it says `on cpu` (see the caveat at the top of this guide). The results are the same, only slower; YOLO11x
 took about 2 s per frame on the CPU. The reason is that these nodes have no
 Kubernetes GPU device plugin, and their default container runtime isn't NVIDIA's,
 so a `pluginctl` pod gets no GPU device. H00F had a hand-edited containerd template
@@ -753,5 +785,6 @@ producers and consumers with the same commands as Step 6.
 - Tier 2 (patched scheduler) rolled out cleanly on H039, but its injection has
   only been confirmed on H00F (it needs an SES job). It hasn't been tested across
   a reboot.
-- On H039 (and likely H041, which has the same setup) sage-yolo2 runs on the CPU
-  (6c, "Is it using the GPU?"). sage-bioclip2 runs on the CPU on every node (6d).
+- **No GPU on Thor nodes other than H00F** (see the caveat at the top). sage-yolo2
+  runs on the CPU there (6c). sage-bioclip2 runs on the CPU on every node (6d).
+  The fix belongs to the Sage CI team.

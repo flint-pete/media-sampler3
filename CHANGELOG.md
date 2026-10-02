@@ -25,6 +25,10 @@ Fixes from following the install guide from scratch on a fresh node (H039, Oct 2
   is given, but the producer exits 2 without it.
 
 ### Added (install guide)
+- A caveat at the top of the guide: on Thor nodes other than H00F, no plugin gets
+  the GPU. The default containerd runtime is plain runc, and nothing requests
+  NVIDIA's runtime. Survey: H01A, H038, H039, H041, H043. H00F's hand-made
+  `config.toml.tmpl` is the exception.
 - 6a: a producer check that needs no camera. It uses a fake camera address and
   dummy credentials, and proves the image, the cache mount and the heartbeat path
   to Beehive all work.
