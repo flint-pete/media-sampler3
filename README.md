@@ -25,9 +25,10 @@ Related repos:
 
 **v0.1.0.** The image path has been in production on H00F since 2026-07-23. The
 full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
-cameras in Sep 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
-once a minute). `make test`: 237 passed, 8 skipped (the skipped image tests need
-PIL, which the test venv doesn't have).
+cameras in Sep 2026, and the install guide was re-run from scratch on H039 (no
+cameras) in Oct 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
+once a minute). `make test` (creates its own `.venv-test` on first run): 237 passed,
+8 skipped (the skipped image tests need PIL, which the test venv doesn't have).
 
 ## Core concepts
 

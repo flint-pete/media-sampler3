@@ -14,7 +14,13 @@ PY?=.venv-test/bin/python
 
 all: test
 
-test:
+# A fresh clone has no venv: create one with the runtime deps + pytest.
+# (PIL is deliberately not installed; the 8 PIL-only image tests skip.)
+$(PY):
+	python3 -m venv .venv-test
+	.venv-test/bin/pip install -q -r requirements.txt pytest
+
+test: $(PY)
 	$(PY) -m pytest -q
 
 sideload:

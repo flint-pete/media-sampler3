@@ -15,6 +15,29 @@ preserved in
 
 ## [Unreleased]
 
+Fixes from following the install guide from scratch on a fresh node (H039, Oct 2026).
+
+### Fixed
+- `make test` works on a fresh clone. It now creates `.venv-test` itself, from
+  `requirements.txt` plus pytest. Before, it assumed a venv that only existed on the
+  developer's machine.
+- Install guide: `--stream` is required. It was described as optional when `--name`
+  is given, but the producer exits 2 without it.
+
+### Added (install guide)
+- 6a: a producer check that needs no camera. It uses a fake camera address and
+  dummy credentials, and proves the image, the cache mount and the heartbeat path
+  to Beehive all work.
+- 6a: a table of the producer's start-up exit-2 messages and how to fix each.
+- Step 3: show `wes-identity` before and after Tier 1. Tier 2: a rollout check
+  anyone can do; the injection check uses `-n ses` and needs an SES job; the
+  scheduler's start-up clean-up doesn't touch `pluginctl` pods.
+- 6c/6d: how to tell whether a consumer is on the GPU. On H039 sage-yolo2 runs on
+  the CPU (no GPU device plugin and no NVIDIA default runtime), and sage-bioclip2
+  runs on the CPU everywhere (it never passes a device to pybioclip). Also noted
+  that bioclip2 contacts huggingface.co at start-up.
+- Real Step 5 build times, and H039 added to the list of verified nodes.
+
 ## [0.1.0] - 2026-10-01
 
 First tagged release of media-sampler3: the image and audio producer for the

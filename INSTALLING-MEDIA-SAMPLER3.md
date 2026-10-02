@@ -5,9 +5,15 @@ installs every component of the media stack, then proves it works end to end wit
 a bird-detection cascade (camera → frames → detector → crops → species classifier
 → Beehive).
 
-Every command here was run on live Thor nodes (H038 and H041, Sep 2026). On H041
-the full cascade ran with two real Reolink cameras, and seeded test birds were
-classified correctly (*Cardinalis cardinalis* and *Eopsaltria australis*).
+Every command here was run on live Thor nodes:
+
+- **H041 (Sep 2026):** the full cascade ran with two real Reolink cameras, and
+  seeded test birds were classified correctly (*Cardinalis cardinalis* and
+  *Eopsaltria australis*).
+- **H039 (Oct 2026):** a fresh install, following this guide from top to bottom
+  with no cameras attached. Steps 0–5, Tier 2, the no-camera producer check (6a)
+  and the seeded-bird cascade (6f) all passed, with results reaching Beehive.
+- H038 was the first attempt (see the prerequisite note).
 
 **Three companion documents in this repo:**
 
@@ -242,6 +248,16 @@ then launches a small reader pod. The pod explicitly mounts the ConfigMap
 (`envFrom`) and runs an inline copy of pywaggle2's `read_node_info()` logic, to
 prove the values are readable.
 
+First look at the stock ConfigMap, so you can see what changes. A stock node has
+only 2 variables:
+
+```bash
+sudo k3s kubectl get configmap wes-identity -o jsonpath='{.data}'; echo
+#   -> {"WAGGLE_NODE_ID":"...","WAGGLE_NODE_VSN":"<VSN>"}
+```
+
+Then apply Tier 1:
+
 ```bash
 cd ~/AI-projects/wes-nodeinfo-injection/node-test
 export KUBECTL="sudo k3s kubectl"
@@ -270,6 +286,9 @@ Expected output, indented by the script (values are this node's):
 `mobility` is `"unknown"` because no fleet manifest sets it yet. If the manifest
 has no GPS, the raw values show sentinels (e.g. `999` or empty) and `lat`/`lon`
 come back `null`. The reader never invents coordinates.
+
+Check the ConfigMap again. It now has all 5 variables (`WAGGLE_NODE_GPS_LAT`,
+`WAGGLE_NODE_GPS_LON` and `WAGGLE_NODE_MOBILITY` are new):
 
 ```bash
 sudo k3s kubectl get configmap wes-identity -o jsonpath='{.data}'; echo
@@ -318,12 +337,34 @@ export KUBECTL="sudo k3s kubectl"
 ./test-add-scheduler.sh       # ~3-6 min build + rollout; auto-reverts if the rollout fails
 ```
 
-To verify, check a scheduler-launched plugin pod (not a `pluginctl` pod):
+**Verify the rollout** (anyone can do this):
 
 ```bash
-sudo k3s kubectl get pod <some-plugin> -o jsonpath='{.spec.containers[0].envFrom}'
+sudo k3s kubectl get deployment wes-plugin-scheduler \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+#   -> docker.io/library/edge-scheduler:nodeinfo-test
+sudo k3s kubectl get pods | grep wes-plugin-scheduler          # Running
+sudo k3s kubectl logs deploy/wes-plugin-scheduler --tail=5     # "Node scheduler ("<VSN>") starts..."
+```
+
+**Verify the injection itself.** You need a pod that the *scheduler* launched,
+which means an SES job targeting this node (submitted through the cloud with
+`sesctl` and a Sage token). `pluginctl` pods never count. Scheduler-launched pods
+live in the **`ses` namespace**, so pass `-n ses`:
+
+```bash
+sudo k3s kubectl get pods -n ses
+sudo k3s kubectl get pod -n ses <plugin-pod> -o jsonpath='{.spec.containers[0].envFrom}'
 #   -> [{"configMapRef":{"name":"wes-identity","optional":true}}]
 ```
+
+On H039 the rollout check passed, but no SES job was submitted, so the injection
+check is still to do there. It was verified on H00F.
+
+> **The scheduler restart does not touch your `pluginctl` pods.** On startup the
+> scheduler logs "Attempting to clean up all plugins". That clean-up only deletes
+> pods in the `ses` namespace. `pluginctl` pods live in `default` and are left
+> running.
 
 Revert with `./test-remove-scheduler.sh`. The patched scheduler runs a side-loaded
 image. If a reboot ever loses that image, scheduling stops until you run
@@ -352,8 +393,10 @@ Steps 1–2 must come first. Flags and file contract:
 ## Step 5: Build the test consumers (sage-yolo2, sage-bioclip2)
 
 These use a GPU/CUDA base image (`nvcr.io/nvidia/pytorch:25.08-py3`) and are
-**large, slow builds**: yolo2 is about 10 GiB and bioclip2 about 17 GiB, tens of
-minutes each. Check `df -h /` first. Each repo ships
+**large builds**: yolo2 is about 10 GiB and bioclip2 about 17 GiB. Check `df -h /`
+first. Each one took 5–30 minutes. Most of that time is downloading the CUDA base
+image and importing into k3s; on H039 the base was already cached, so yolo2 took
+6 min and bioclip2 10 min. Each repo ships
 `scripts/deploy-sideload.sh`, which reads name, namespace, and version from its
 `sage.yaml` and does build → import (→ optional ECR register).
 
@@ -396,14 +439,54 @@ pods in the `default` namespace. Two flags appear on every launch:
 - `-v /media/plugin-data/local-cache:/local-cache` is what gives the pod the
   shared cache.
 
-### 6a. (No camera) seed a synthetic cache
+### 6a. (No camera) check the producer, then seed a synthetic cache
+
+**Check the producer without a camera.** Point it at a test address that never
+answers (`192.0.2.10` is reserved for documentation) with dummy credentials. This
+proves the image, the cache mount, and the heartbeat path to Beehive all work:
+
+```bash
+umask 077; printf 'CAMERA_USER=dummy\nCAMERA_PASSWORD=dummy\n' > ~/ms3-dummy-creds.env
+sudo pluginctl run --name ms3-smoke --selector zone=core \
+  --env-from ~/ms3-dummy-creds.env \
+  -v /media/plugin-data/local-cache:/local-cache \
+  localhost/media-sampler3:0.1.0 -- \
+  --continuous 10 --media image --stream top_camera --name top \
+  --cache-root /local-cache --cache-name smoke \
+  --cache-max-count 20 --heartbeat-secs 20 --vsn "$VSN" \
+  --camera-host 192.0.2.10 &
+sleep 60; sudo k3s kubectl logs ms3-smoke | tail -4
+#   "capture skipped: capture timeout ..." every 10 s, and
+#   "heartbeat: ... status=skip" every 20 s. The pod stays Running.
+```
+
+Within a minute, the heartbeats show up in the cloud (`q` is defined in 6e):
+`q env.mediasampler.cache.written` returns rows with `"task":"ms3-smoke"`. Then
+clean up:
+
+```bash
+sudo pluginctl rm ms3-smoke; rm -f ~/ms3-dummy-creds.env
+sudo rmdir /media/plugin-data/local-cache/smoke/top /media/plugin-data/local-cache/smoke
+```
+
+**Seed the cache.** The consumers only need JPEGs in the producer's directory:
 
 ```bash
 sudo mkdir -p /media/plugin-data/local-cache/camera/top
 # copy in JPEGs named like real frames: <ns-timestamp>-v2-<VSN>-top.jpg
-# (6f gives a ready-made bird image)
+# (6f gives a ready-made bird image and the exact command)
 sudo ls -l /media/plugin-data/local-cache/camera/top/
 ```
+
+**If the producer exits right away.** It checks its configuration at startup and
+exits with code 2 and a one-line reason (`sudo k3s kubectl logs <name>`):
+
+| Message | Fix |
+|---|---|
+| `at least one --stream is required` | add `--stream <label>` |
+| `--continuous requires at least one of --cache-max-count / --cache-max-mb` | add a cap; an unbounded ring is refused |
+| `set CAMERA_USER and CAMERA_PASSWORD in the environment` | pass `--env-from <file>` (never put credentials in flags) |
+| a message about `/local-cache` not existing | add `-v /media/plugin-data/local-cache:/local-cache` |
 
 ### 6b. (Cameras attached) run the live producers, one per camera
 
@@ -474,8 +557,8 @@ What the naming flags do:
 - `--name` also becomes the `<source>` in each filename, `<ts>-v2-<VSN>-top.jpg`,
   and the `camera` field in EXIF. sage-yolo2 uses that field to name its crop
   directories (`top-crop-N`).
-- `--stream` is just the stream label. It's used for naming only when `--name` is
-  omitted.
+- `--stream` is the stream label, and it is **required**. It's used for the
+  directory and file names only when `--name` is omitted.
 
 Optional flags: add `--lat <deg> --lon <deg>` to put GPS in EXIF, and
 `--plugin-version localhost/media-sampler3:0.1.0` to record the image version
@@ -517,7 +600,7 @@ sudo pluginctl run --name camera-audio-producer --selector zone=core \
 ### 6c. Run sage-yolo2 (detector and crop producer)
 
 GPU consumers **must** set a memory limit, or the kernel kills them (OOMKilled,
-exit 137):
+exit 137). See "Is it using the GPU?" below the command.
 
 ```bash
 sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
@@ -550,6 +633,23 @@ What the flags mean:
   second yolo2 with a different `--name` (pod name) and
   `--input /local-cache/camera/side`. That hasn't been run yet.
 
+**Is it using the GPU?** The startup log says which device was chosen:
+
+```bash
+sudo k3s kubectl logs sage-yolo2-consumer | grep 'Loading yolo11x.pt on'
+#   "... on cuda"  -> GPU
+#   "... on cpu"   -> CPU
+```
+
+On H039 it says `on cpu`, and H041 has the same container-runtime setup. The results are the same, only slower; YOLO11x
+took about 2 s per frame on the CPU. The reason is that these nodes have no
+Kubernetes GPU device plugin, and their default container runtime isn't NVIDIA's,
+so a `pluginctl` pod gets no GPU device. H00F had a hand-edited containerd template
+that made NVIDIA's runtime the default, which is why it ran `on cuda`. `pluginctl`
+has no flag to request the GPU, so making GPU access standard is a node-config
+decision for the CI team; don't change k3s's containerd config on a shared node
+yourself.
+
 ### 6d. Run sage-bioclip2 (species classifier)
 
 ```bash
@@ -561,6 +661,14 @@ sudo pluginctl run --name sage-bioclip2-consumer --selector zone=core \
   --source cache --input /local-cache/camera-crops/top-crop-0 \
   --every 10m --all-unseen --max-frames 0 --rank Species --min-confidence 0.1 &
 ```
+
+sage-bioclip2 **always runs on the CPU**, whatever the node offers: it never
+passes a device to pybioclip, whose default is `cpu`. That's an open improvement,
+listed in its README.
+
+sage-bioclip2 also makes a few HEAD requests to `huggingface.co` while it loads
+the model, even though the weights are baked into the image. So it needs
+outbound network access (it had it on H039).
 
 The `--input` paths chain together: the producer's `--cache-name`/`--name`
 determine yolo2's `--input`, and yolo2's `--crop-cache-name` plus the producer's
@@ -606,9 +714,10 @@ sudo cp ~/AI-projects/sage-yolo2/tests/test-images/bird-cardinal-sample.jpg \
 # yolo2 picks it up on its next wake (or relaunch the consumer to process it now)
 ```
 
-On H041 this produced `env.count.bird = 1`, a crop under
+On H041, and again on H039, this produced `env.count.bird = 1`, a crop under
 `camera-crops/top-crop-0/`, and then bioclip2 published **`Cardinalis
-cardinalis`** at 100% confidence. A second test with an Australian robin returned
+cardinalis`** at 100% confidence. All of it showed up in the 6e queries, tagged
+with the node's VSN. A second test on H041 with an Australian robin returned
 *Eopsaltria australis*.
 
 **Delete the seeded file after the test.** It wasn't written by media-sampler3,
@@ -641,5 +750,8 @@ producers and consumers with the same commands as Step 6.
   shared consumer code; see the sage-bioclip2 README).
 - The SES job files in `jobs/` are untested templates.
 - The audio producer hasn't been run on H041 (proven on H00F only).
-- Tier 2 (patched scheduler) wasn't exercised on H041 and hasn't been tested
-  across a reboot.
+- Tier 2 (patched scheduler) rolled out cleanly on H039, but its injection has
+  only been confirmed on H00F (it needs an SES job). It hasn't been tested across
+  a reboot.
+- On H039 (and likely H041, which has the same setup) sage-yolo2 runs on the CPU
+  (6c, "Is it using the GPU?"). sage-bioclip2 runs on the CPU on every node (6d).
