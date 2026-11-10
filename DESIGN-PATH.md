@@ -139,6 +139,11 @@ that cost.
     yolo2 crops and the Beehive records (`location_source: node`). It became the
     single launch path in the install guide; `--vsn` and the scheduler swap left
     the main path.
+- **Outcome (Nov 2026): merged upstream.** The CI team landed it as
+  waggle-edge-stack 697e338 (GPS in `wes-identity`, written correctly in all three
+  places; our patch 0001 had missed the ConfigMap heredoc and kustomize literals)
+  and edge-scheduler 0.29.2 (`envFrom`, identical to patch 0002, covering
+  `pluginctl run` too). No mobility var. The repo is archived; Tiers 1/1b/2 are retired.
 - **Details:** that repo's `README.md`, `HANDOFF.md`, `CHANGELOG.md`, and
   `docs/history/`, plus the RFC
   [pywaggle2-design.md](https://github.com/flint-pete/sage-design-planning/blob/master/pywaggle2-design.md).
@@ -152,8 +157,10 @@ that cost.
     (`waggle/data/node_info_env.py`), so it can land in pywaggle unchanged.
   - **Sentinel rules locked:** coordinates are checked by range, which catches
     the manifest's `999`, and nothing is ever fabricated.
-  - **Vendored, not installed.** pywaggle2 isn't published yet, so plugins carry
-    a copy (a pinned version) instead of a pip dependency.
+  - **Vendored, not installed** (until Nov 2026), because pywaggle2 wasn't published.
+  - **Outcome (Nov 2026): merged upstream** as pywaggle 0.57.0/0.57.1
+    `waggle.data.node_info_env` (code unchanged). Plugins now pin `pywaggle==0.57.1`
+    and the vendored copies are gone; the repo is archived.
 - **Details:** that repo's
   [DESIGN.md](https://github.com/flint-pete/pywaggle2-nodeinfo/blob/master/DESIGN.md)
   and `docs/history/`.
@@ -198,8 +205,9 @@ that cost.
     `consumer.py`/`selection.py`/`seenstore.py`, plus one addition, a reader for
     media-sampler3's `<clip>.flac.json` sidecars (audio has no EXIF).
   - **Location from the node.** The geo filter originally needed `--lat/--lon`.
-    With `pluginctl-nodeinfo` (H039, Oct 2026), it takes the node's GPS from the
-    pod env with no flags.
+    With `pluginctl-nodeinfo` (H039, Oct 2026), and since Nov 2026 with the stock
+    `pluginctl` (WES-native identity), it takes the node's GPS from the pod env
+    with no flags.
   - **Pinned `birdnet==0.2.16`.** The first on-node build (H039) failed because
     the unpinned dependency resolved to birdnet 1.x, which no longer pulls in
     TensorFlow.

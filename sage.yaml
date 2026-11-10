@@ -1,6 +1,6 @@
 name: "media-sampler3"
 description: "Versatile media sampler: capture-time naming, self-describing EXIF/JSON provenance, dual upload+local-cache, fleet-portable node identity. Captures JPEG frames AND audio clips into the shared /local-cache (v2 cache-frame contract)."
-version: "0.1.1"
+version: "0.2.0"
 namespace: "beckman"
 authors: "Pete Beckman <pete.beckman@northwestern.edu>"
 collaborators: "Waggle Team <https://wa8.gl>"
@@ -20,9 +20,9 @@ source:
 # referenced by the job's pod spec (envFrom/secretRef), not as inputs here.
 #
 # NOTE on node identity: vsn / node_id / lat / lon resolve at runtime from the
-# WAGGLE_NODE_* env (wes-nodeinfo-injection), then a readable
-# /etc/waggle/node-manifest-v2.json, else a placeholder. Pods started with
-# `pluginctl run` get neither, so pass --vsn (and --lat/--lon for EXIF GPS).
+# WAGGLE_NODE_* env (WES wes-identity, via pywaggle 0.57.1), then a readable
+# /etc/waggle/node-manifest-v2.json, else a placeholder. On nodes older than
+# WES 697e338 / pluginctl 0.29.2 pods get neither: pass --vsn (and --lat/--lon).
 inputs:
   - id: "one-shot"
     type: "boolean"

@@ -38,18 +38,19 @@ Two platform pieces make this safe to run on a real node:
 
 - **A disk bound.** A full disk would break the node.
   **wes-local-cache-manager** caps `/local-cache`.
-- **Node identity.** Results need a VSN and location. **wes-nodeinfo-injection**
-  publishes them, and **pywaggle2-nodeinfo** is the library that reads them.
+- **Node identity.** Results need a VSN and location. **WES** publishes them into
+  every pod, and **pywaggle** (`waggle.data.node_info_env`) reads them. Both were
+  merged upstream in Nov 2026 from our wes-nodeinfo-injection / pywaggle2-nodeinfo.
 
 ---
 
-## 2. The seven components and who owns what
+## 2. The components and who owns what
 
 | Component | Kind | Owns | Talks to |
 |-----------|------|------|----------|
 | [wes-local-cache-manager](https://github.com/flint-pete/wes-local-cache-manager) | WES DaemonSet (node service) | keeping `/media/plugin-data/local-cache` under its byte caps; never touches `.state/` | the filesystem only |
-| [wes-nodeinfo-injection](https://github.com/flint-pete/wes-nodeinfo-injection) | WES change: a ConfigMap generator plus a patched `pluginctl` (and an optional patched scheduler) | the `wes-identity` ConfigMap (5 `WAGGLE_NODE_*` vars); `pluginctl-nodeinfo`, whose pods get `envFrom: wes-identity` | k3s |
-| [pywaggle2-nodeinfo](https://github.com/flint-pete/pywaggle2-nodeinfo) | library (copied into plugins) | the rules for turning raw env values into a clean `NodeInfo` (sentinels become `None`, no invented GPS) | the env of whatever pod imports it |
+| Node identity in [WES](https://github.com/waggle-sensor/waggle-edge-stack) (>= 697e338) + SES/pluginctl (>= 0.29.2) | platform (upstream) | the `wes-identity` ConfigMap (4 `WAGGLE_NODE_*` vars); `envFrom: wes-identity` on every plugin pod | k3s |
+| [pywaggle](https://github.com/waggle-sensor/pywaggle) `waggle.data.node_info_env` (>= 0.57.1) | library (pip dependency of each plugin) | the rules for turning raw env values into a clean `NodeInfo` (sentinels become `None`, no invented GPS) | the env of whatever pod imports it |
 | **media-sampler3** (this repo) | plugin (producer) | capturing frames and clips, naming them, embedding provenance, bounding its own ring, heartbeats | camera (HTTP), `/local-cache`, Beehive (heartbeats only) |
 | [sage-yolo2](https://github.com/flint-pete/sage-yolo2) | plugin (consumer, and also a crop producer) | detection, counts, crop files, its seen-store | `/local-cache` (read frames, write crops), Beehive |
 | [sage-bioclip2](https://github.com/flint-pete/sage-bioclip2) | plugin (consumer) | species classification, its seen-store | `/local-cache` (read crops), Beehive |
@@ -124,14 +125,11 @@ Three possible sources, from strongest to weakest:
 
 1. **Explicit flags.** media-sampler3 `--vsn`, `--lat`, `--lon`. These always win.
 2. **The pod environment.** `WAGGLE_NODE_VSN`, `_ID`, `_GPS_LAT`, `_GPS_LON`,
-   `_MOBILITY`, from the `wes-identity` ConfigMap. They're present only when the
-   pod spec has `envFrom: wes-identity`. Two things add that:
-   - `pluginctl-nodeinfo` (install Step 3), for hand-launched pods; this is what
-     the stack uses;
-   - the patched WES scheduler (wes-nodeinfo-injection "Tier 2"), for SES jobs.
-
-   **Pods from the stock `pluginctl run` don't get them**, because the stock
-   binary builds pods itself, with unpatched code.
+   from the `wes-identity` ConfigMap. WES 697e338+ writes GPS into it, and
+   edge-scheduler 0.29.2 adds `envFrom: wes-identity` to every plugin pod, both
+   `pluginctl run` and SES jobs. (Before Nov 2026 this needed our patched
+   `pluginctl-nodeinfo` / scheduler; those are retired. Upstream does not publish
+   `_MOBILITY`, so readers report `unknown`.)
 3. **Files on the node** (`/etc/waggle/node-manifest-v2.json`, `/etc/waggle/vsn`).
    These are host files and usually aren't visible inside a pod.
 
@@ -145,23 +143,20 @@ How each component uses identity:
   no flags.
 - **sage-yolo2 / sage-bioclip2** trust the **frame's EXIF identity** first, so a
   result is attributed to the node that captured the frame. They use the pod env
-  (through the copied-in pywaggle2 `node_info.py`) only for missing fields and to
+  (through pywaggle's `waggle.data.node_info_env`) only for missing fields and to
   warn on a mismatch.
 - **Beehive** attaches the node's VSN to every published record during routing,
   whatever the plugin says.
 
-The sentinel rules live in pywaggle2-nodeinfo and are reproduced in each copy:
+The sentinel rules live in pywaggle (`waggle/data/node_info_env.py`):
 
 - empty or `"0"` VSN becomes `None`
-- a coordinate outside ±90 / ±180 (e.g. `999`) becomes `None`
+- a coordinate outside ±90 / ±180 (e.g. `999`), or empty (what upstream WES writes when the manifest has none), becomes `None`
 - missing or unknown mobility becomes `"unknown"`
 
-Copies that must stay in sync with the canonical code:
-
-- `wes-nodeinfo-injection/pywaggle2/` (a byte-identical mirror)
-- the inline reader in its test pod
-- `media-sampler3/nodemeta.py` (a re-implementation)
-- `sage-yolo2/node_info.py` and `sage-bioclip2/node_info.py` (vendored v0.1.1)
+All plugins in this stack now import that one reader (pywaggle pinned to 0.57.1);
+there are no vendored copies left to keep in sync. media-sampler3's `nodemeta.py`
+wraps it for the env tier and adds the flag and host-file tiers around it.
 
 ---
 
@@ -226,8 +221,8 @@ and `IS2_PLACEHOLDER_VSN`.
    same consumer code plus one sidecar reader, for audio.
 5. Read wes-local-cache-manager `manager/sweeper.py` (short): the Layer-2 safety
    net.
-6. Read wes-nodeinfo-injection's README and `gen-wes-identity.sh`, then
-   pywaggle2-nodeinfo `waggle/data/node_info_env.py`: the identity path.
+6. Read pywaggle's `src/waggle/data/node_info_env.py` and the `update_wes()` part of
+   waggle-edge-stack `kubernetes/update-stack.sh`: the identity path.
 7. Do a full install on a test node with the install guide, then practice
    [REBOOT-RECOVERY.md](../REBOOT-RECOVERY.md).
 

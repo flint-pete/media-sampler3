@@ -6,22 +6,20 @@
 # media-sampler3 -- node identity resolution.
 #
 # ============================================================================
-# Runtime identity is now LIVE via the WES wes-nodeinfo-injection change.
+# Runtime identity comes from WES + upstream pywaggle (Nov 2026).
 # ============================================================================
-# As of 2026-07-12 a running plugin CAN learn its own VSN + GPS at runtime: the
-# WES change projects the `wes-identity` ConfigMap into every plugin pod via
-# `envFrom`, exposing five env vars (verified live on H00F, both tiers):
+# The CI team merged our node-identity work: WES (waggle-edge-stack 697e338,
+# SES/pluginctl 0.29.2) projects the `wes-identity` ConfigMap into every plugin
+# pod -- scheduled jobs AND `pluginctl run` -- exposing four env vars:
 #   WAGGLE_NODE_ID  WAGGLE_NODE_VSN  WAGGLE_NODE_GPS_LAT  WAGGLE_NODE_GPS_LON
-#   WAGGLE_NODE_MOBILITY
-# `_runtime_identity()` below reads them (sentinel->None normalized). This is the
-# Tier-1 static-identity source; a live-gpsd Tier-2 GPS() wrapper is complementary
-# (wraps WAGGLE_GPS_SERVER, already injected) and out of scope here.
+# and pywaggle >= 0.57.1 reads them (`waggle.data.node_info_env.read_node_info`).
+# `_runtime_identity()` below delegates to that reader. (Our earlier patched
+# scheduler / `pluginctl-nodeinfo` shims and the WAGGLE_NODE_MOBILITY var are
+# retired; upstream does not emit mobility.)
 #
-# HISTORY: before this change there was NO supported runtime lookup -- pywaggle
-# 0.56 had no gps/vsn API, plugin pods had only WAGGLE_PLUGIN_*/WAGGLE_SCOREBOARD
-# env and no /etc/waggle mount, and plugins let Beehive attach identity DOWNSTREAM
-# via routing. That downstream attribution STILL works, so runtime identity here is
-# an enrichment (shapes the v2 filename + EXIF GPS), never a correctness requirement.
+# Beehive still attributes the node DOWNSTREAM via message routing, so runtime
+# identity here is an enrichment (shapes the v2 filename + EXIF GPS), never a
+# correctness requirement.
 # ============================================================================
 #
 # Resolution precedence (high -> low), applied per field:
@@ -75,48 +73,29 @@ def load_manifest(path=None):
 
 
 def _runtime_identity():
-    """Runtime node-identity lookup from the WES-injected env vars.
+    """Runtime node-identity lookup from the WES-injected env vars, via pywaggle.
 
-    The WES `wes-nodeinfo-injection` change (verified live on H00F 2026-07-12)
-    projects the `wes-identity` ConfigMap into every plugin pod via `envFrom`, so a
-    running plugin now learns its own identity + GPS from five env vars:
+    WES (waggle-edge-stack >= 697e338, SES/pluginctl >= 0.29.2) projects the
+    `wes-identity` ConfigMap into every plugin pod via `envFrom`:
 
-        WAGGLE_NODE_ID  WAGGLE_NODE_VSN  WAGGLE_NODE_GPS_LAT
-        WAGGLE_NODE_GPS_LON  WAGGLE_NODE_MOBILITY
+        WAGGLE_NODE_ID  WAGGLE_NODE_VSN  WAGGLE_NODE_GPS_LAT  WAGGLE_NODE_GPS_LON
 
-    Sentinels are normalized -> None here so nothing downstream ever sees a
-    placeholder (contract mirrors pywaggle2 node_info_env.py):
-      - vsn:      "0" / "" / missing            -> None
-      - node_id:  "" / missing                  -> None
-      - lat/lon:  by RANGE (|lat|>90, |lon|>180, covers the 999 sentinel) or
-                  unparseable / "" / missing    -> None  (never fabricated)
+    pywaggle >= 0.57.1 reads them with sentinel->None normalization
+    (`waggle.data.node_info_env.read_node_info`, merged upstream from our
+    pywaggle2-nodeinfo reader): vsn "0"/""/missing, node_id ""/missing, and
+    off-globe / unparseable / "" coordinates all come back as None (never
+    fabricated). Fail-soft: if that module is missing (older pywaggle off-node),
+    every field is None and identity falls through to CLI / host manifest.
 
     Returns: {"vsn": None|str, "node_id": None|str, "lat": None|float,
               "lon": None|float}
     """
-    e = os.environ
-
-    def _clean(v, sentinels=("",)):
-        if v is None:
-            return None
-        v = v.strip()
-        return None if v in sentinels else v
-
-    def _coord(v, limit):
-        if v is None or v.strip() == "":
-            return None
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return None
-        return f if abs(f) <= limit else None
-
-    return {
-        "vsn": _clean(e.get("WAGGLE_NODE_VSN"), sentinels=("", "0")),
-        "node_id": _clean(e.get("WAGGLE_NODE_ID")),
-        "lat": _coord(e.get("WAGGLE_NODE_GPS_LAT"), 90.0),
-        "lon": _coord(e.get("WAGGLE_NODE_GPS_LON"), 180.0),
-    }
+    try:
+        from waggle.data.node_info_env import read_node_info
+    except ImportError:
+        return {"vsn": None, "node_id": None, "lat": None, "lon": None}
+    ni = read_node_info()
+    return {"vsn": ni.vsn, "node_id": ni.node_id, "lat": ni.lat, "lon": ni.lon}
 
 
 def _as_float(v):
@@ -132,7 +111,7 @@ def resolve_identity(*, vsn=None, node_id=None, lat=None, lon=None,
                      manifest_path=None):
     """Resolve node identity; ALWAYS returns usable values, never fails.
 
-    Per-field precedence: explicit arg > runtime lookup (placeholder today) >
+    Per-field precedence: explicit arg > runtime lookup (WES env via pywaggle) >
     node manifest / /etc/waggle files (host-only). If vsn is still unknown it
     falls back to PLACEHOLDER_VSN so the v2 filename is always well-formed
     (marked "vsn_is_placeholder": True). lat/lon that cannot be resolved come

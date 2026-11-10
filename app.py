@@ -233,8 +233,9 @@ def build_parser():
 
     # --- node / provenance identity (design 2.9/2.11 field set) ----------------
     # Node identity (vsn, node_id, gps) is resolved at runtime by
-    # nodemeta.resolve_identity(): the WES wes-nodeinfo-injection change now projects
-    # the 5 WAGGLE_NODE_* env vars into every plugin pod, and the manifest is read as
+    # nodemeta.resolve_identity(): WES (697e338+, SES 0.29.2) projects the
+    # WAGGLE_NODE_* env vars into every plugin pod (read via pywaggle 0.57.1's
+    # waggle.data.node_info_env), and the manifest is read as
     # a host-only fallback (dev/spikes). These flags OVERRIDE both, so the plugin
     # self-identifies on any node with no per-node config. Defaults are None here.
     parser.add_argument(

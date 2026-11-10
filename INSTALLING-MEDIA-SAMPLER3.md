@@ -15,6 +15,9 @@ Every command here was run on live Thor nodes:
   bird image and the seeded bird-song clip (*Sialia sialis*), with results reaching
   Beehive. The live-camera step (6h) is next.
 - H038 was the first attempt (see the prerequisite note).
+- **H019 (Nov 2026, in progress):** first install on a node whose WES provides
+  node identity natively (SES/pluginctl 0.29.2), with the consumers on upstream
+  pywaggle 0.57.1. Steps 2–3 below are now checks, not installs.
 
 > **GPU.** Thor nodes run pods with NVIDIA's container runtime by default: the
 > Sage CI team set k3s `default-runtime: nvidia` across the fleet in Oct 2026. So a
@@ -35,13 +38,13 @@ Every command here was run on live Thor nodes:
 
 ## The components (with links)
 
-**Four components to install:**
+**Two components to install, two provided by the platform:**
 
 | # | Component | What it is | Repo |
 |---|-----------|-----------|------|
 | 1 | **wes-local-cache-manager** | A DaemonSet that keeps the shared `/local-cache` directory bounded: per-unit and per-node byte caps, oldest files evicted first. | https://github.com/flint-pete/wes-local-cache-manager |
-| 2 | **wes-nodeinfo-injection** | A WES change that publishes 5 node-identity values (VSN, node id, GPS lat/lon, mobility) in the `wes-identity` ConfigMap, plus a patched `pluginctl` (`pluginctl-nodeinfo`) whose pods receive them. (Its optional patched scheduler does the same for SES jobs; not needed here.) | https://github.com/flint-pete/wes-nodeinfo-injection |
-| 3 | **pywaggle2-nodeinfo** | The **reader** side of #2. `read_node_info()` turns those env vars into a clean `NodeInfo`. It is a library that gets copied ("vendored") into plugin images; nothing is deployed on the node. | https://github.com/flint-pete/pywaggle2-nodeinfo |
+| 2 | **Node identity (built into WES)** | WES publishes the node's VSN, node id and GPS lat/lon in the `wes-identity` ConfigMap, and every plugin pod (`pluginctl run` and scheduled jobs) receives them as env vars. Merged upstream Nov 2026 (waggle-edge-stack 697e338, SES/pluginctl 0.29.2) from our former wes-nodeinfo-injection, which is now archived. **Nothing to install; Steps 2–3 check it.** | https://github.com/waggle-sensor/waggle-edge-stack |
+| 3 | **Node-identity reader (in pywaggle)** | The reader side of #2: `from waggle.data.node_info_env import read_node_info` (pywaggle >= 0.57.1) turns those env vars into a clean `NodeInfo`. Merged upstream from our former pywaggle2-nodeinfo (archived). It ships inside each plugin image via `requirements.txt`; nothing is deployed on the node. | https://github.com/waggle-sensor/pywaggle |
 | 4 | **media-sampler3** | The **producer**. Captures JPEG stills (and optionally FLAC audio) from a camera into `/local-cache` as a bounded ring of self-describing files. | https://github.com/flint-pete/media-sampler3 |
 
 **Three test consumers.** They exist to prove the stack works, and they are also
@@ -57,9 +60,9 @@ audio:
 Each repo's README explains its code and has a "where this fits" section that
 links back here.
 
-Step 0 clones `master` of all seven repos; that is what this guide was tested
-against. The images it builds are `localhost/media-sampler3:0.1.1`,
-`.../sage-yolo2:2.1.1`, `.../sage-bioclip2:2.1.0` and `.../sage-birdnet2:2.0.1`.
+Step 0 clones `master` of the five repos. The images it builds are
+`localhost/media-sampler3:0.2.0`, `.../sage-yolo2:2.2.0`, `.../sage-bioclip2:2.2.0`
+and `.../sage-birdnet2:2.1.0`.
 
 ---
 
@@ -92,8 +95,8 @@ cam mic ▶│  media-sampler3 │─(+ .json)─────▶│ /local-cache
                                               └───────────────────┘
 
 wes-local-cache-manager ── bounds /local-cache (byte caps, oldest-first eviction)
-wes-nodeinfo-injection  ── publishes VSN + GPS in the wes-identity ConfigMap
-pywaggle2-nodeinfo      ── the library a plugin uses to READ those values
+WES (>= 697e338)        ── publishes VSN + GPS in the wes-identity ConfigMap, into every pod
+pywaggle (>= 0.57.1)    ── waggle.data.node_info_env: what a plugin uses to READ those values
 ```
 
 There are two separate data flows; keep them apart in your head:
@@ -142,7 +145,7 @@ the `default` namespace, and the image builds and imports need root.
 The node also needs (a standard Thor has them all, but check): `podman`,
 `docker`, `k3s`, `pluginctl`, `git`, `make`, `curl`, and **working DNS**, because
 image builds pull base images from Docker Hub and `nvcr.io`. Host Go is **not**
-needed (Step 3 compiles Go inside a container).
+needed.
 
 ---
 
@@ -157,9 +160,10 @@ needed (Step 3 compiles Go inside a container).
   ever been side-loaded, so a registry pull returns `not found`. (The Sage ECR
   portal can build Thor images, GPU/CUDA ones included; these just haven't been
   published yet.)
-- **Launch plugins with `sudo pluginctl-nodeinfo run`**, the patched `pluginctl`
-  you install in Step 3. It takes exactly the same flags as `pluginctl`; the only
-  difference is that its pods receive the node's identity (VSN, GPS, ...).
+- **Launch plugins with the stock `sudo pluginctl run`.** On a node with
+  pluginctl >= 0.29.2 (Step 3) its pods receive the node's identity (VSN, GPS, ...)
+  automatically. (The patched `pluginctl-nodeinfo` used before Nov 2026 is retired;
+  remove it if a node still has it, see Step 3.)
 - **Side-loaded means not reboot-durable.** Pods do not come back after a reboot.
   See [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md).
 
@@ -169,8 +173,7 @@ needed (Step 3 compiles Go inside a container).
 
 ```bash
 mkdir -p ~/AI-projects && cd ~/AI-projects
-for r in wes-local-cache-manager wes-nodeinfo-injection pywaggle2-nodeinfo \
-         media-sampler3 sage-yolo2 sage-bioclip2 sage-birdnet2; do
+for r in wes-local-cache-manager media-sampler3 sage-yolo2 sage-bioclip2 sage-birdnet2; do
   [ -d "$r" ] || git clone https://github.com/flint-pete/$r.git
 done
 ```
@@ -222,86 +225,61 @@ Teardown: `./test-remove-node.sh` (add `WIPE_CACHE=1` to also empty the cache).
 
 ---
 
-## Step 2: Component 2, the node-identity ConfigMap (`wes-identity`)
+## Step 2: Check node identity in the `wes-identity` ConfigMap (Component 2)
 
-Steps 2 and 3 both use wes-nodeinfo-injection's `node-test/` directory. The
-scripts back up every object they touch, and teardown restores from that backup
-([node-test/README](https://github.com/flint-pete/wes-nodeinfo-injection/blob/master/node-test/README.md)).
-
-WES already keeps a ConfigMap called `wes-identity` with 2 values. This script
-regenerates it with 5, taken from this node's manifest, then launches a small
-reader pod that runs pywaggle2's `read_node_info()` logic to prove the values are
-readable. Look at the stock ConfigMap first, so you can see what changes:
+WES writes the node's identity into the `wes-identity` ConfigMap from
+`/etc/waggle` and the node manifest. Since waggle-edge-stack 697e338 (Nov 2026) it
+includes GPS:
 
 ```bash
 sudo k3s kubectl get configmap wes-identity -o jsonpath='{.data}'; echo
-#   -> {"WAGGLE_NODE_ID":"...","WAGGLE_NODE_VSN":"<VSN>"}
-
-cd ~/AI-projects/wes-nodeinfo-injection/node-test
-./test-add-configmap.sh
+#   -> {"WAGGLE_NODE_GPS_LAT":"41.7...","WAGGLE_NODE_GPS_LON":"-87.9...",
+#       "WAGGLE_NODE_ID":"...","WAGGLE_NODE_VSN":"<VSN>"}
 ```
 
-Expected output, indented by the script (values are this node's):
+- **GPS keys present:** done. Empty values (`""`) mean the manifest has no
+  coordinates for this node; plugins then treat GPS as unknown and never invent it.
+- **Only `WAGGLE_NODE_ID` and `WAGGLE_NODE_VSN`:** the node runs an older WES. Ask
+  the Sage CI team to update it (`update-stack.sh` from waggle-edge-stack >= 697e338).
+  Don't hand-edit the ConfigMap: the next WES update overwrites it. The stack still
+  runs without GPS (identity falls back to each plugin's flags, and Beehive
+  attaches the VSN anyway), but birdnet2's geo filter and node-GPS fallbacks are off.
+- No `WAGGLE_NODE_MOBILITY`: upstream does not publish it, so readers report
+  `mobility="unknown"`. That is expected.
 
-```
-    === pywaggle2 NodeInfo (from wes-identity ConfigMap) ===
-    {
-      "vsn": "<VSN>",
-      "node_id": "...",
-      "lat": 41.7,
-      "lon": -87.9,
-      "mobility": "unknown",
-      "vsn_is_placeholder": false
-    }
-    === raw WAGGLE_NODE_* env seen by the pod ===
-      WAGGLE_NODE_ID=...
-      WAGGLE_NODE_VSN=<VSN>
-      WAGGLE_NODE_GPS_LAT=...
-      ...
-```
+## Step 3: Check that pods receive it (pluginctl >= 0.29.2) (Component 3)
 
-`mobility` is `"unknown"` because no fleet manifest sets it yet. If the manifest
-has no GPS, `lat`/`lon` come back `null`; the reader never invents coordinates.
-Re-run the `get configmap` command: it now shows all 5 variables. Revert with
-`./test-remove-configmap.sh`.
-
----
-
-## Step 3: Component 2, the patched `pluginctl` (`pluginctl-nodeinfo`), and Component 3
-
-A ConfigMap does nothing on its own: a pod only sees these variables if its spec
-says `envFrom: wes-identity`. The stock `/usr/bin/pluginctl` builds pods itself,
-without that line, so its pods get nothing. The fix is a one-function patch
-(0002) to the pod-building code that `pluginctl` and the WES scheduler share.
-This step builds the patched code and installs the resulting `pluginctl` as
-`/usr/local/bin/pluginctl-nodeinfo`. The stock `pluginctl` is never touched, and
-no WES object changes:
+A ConfigMap does nothing on its own: a pod sees these variables only if its spec
+says `envFrom: wes-identity`. edge-scheduler 0.29.2 adds that to every plugin pod,
+both scheduled jobs and `pluginctl run`, and WES 697e338 installs those tools:
 
 ```bash
-cd ~/AI-projects/wes-nodeinfo-injection/node-test
-mkdir -p ../.upstream
-[ -d ../.upstream/edge-scheduler ] || {
-  git clone https://github.com/waggle-sensor/edge-scheduler.git ../.upstream/edge-scheduler
-  git -C ../.upstream/edge-scheduler checkout 5391a00          # the tested base commit
-  git -C ../.upstream/edge-scheduler apply \
-      "$(realpath ../patches/0002-edge-scheduler-envfrom-wes-identity.patch)"; }
-./install-pluginctl-nodeinfo.sh     # ~3 min the first time (podman build)
+strings /usr/bin/pluginctl | grep -m1 -o 'main.Version=[0-9.]*'   # expect main.Version=0.29.2 or newer
+# (pluginctl has no `version` subcommand; the version is only in the binary)
+sudo k3s kubectl get deploy wes-plugin-scheduler \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo  # expect ...:0.29.2 or newer
 ```
 
-Every pod it launches carries the node's identity. You can check any of them:
+Retire the old shims if this node ever had them (from the pre-Nov-2026 guide):
+
+```bash
+command -v pluginctl-nodeinfo && sudo rm /usr/local/bin/pluginctl-nodeinfo
+```
+
+Once Step 6a launches a pod, confirm it got the identity:
 
 ```bash
 sudo k3s kubectl get pod <name> -o jsonpath='{.spec.containers[0].envFrom}'; echo
 #   -> [{"configMapRef":{"name":"wes-identity","optional":true}}]
+sudo k3s kubectl exec <name> -- env | grep WAGGLE_NODE_
 ```
 
-What that buys you in this cascade (verified on H039):
+What that buys you in this cascade:
 
 - **media-sampler3** fills VSN and GPS into every frame's EXIF by itself; no
   `--vsn`/`--lat`/`--lon` flags.
 - **yolo2/bioclip2** attribute results with each frame's EXIF identity, and use
-  the pod's identity as a cross-check and as a GPS fallback. On H039 a frame with
-  no GPS still produced records with the node's lat/lon (`location_source: node`).
+  the pod's identity as a cross-check and as a GPS fallback (`location_source: node`).
 - **sage-birdnet2** uses the node's GPS to restrict BirdNET to the species eBird
   expects here and now.
 - **Beehive** attaches the VSN to every record during routing in any case.
@@ -313,25 +291,9 @@ Good to know:
 - `--env-from <file>` (used for camera credentials) works alongside it.
 - If the ConfigMap is missing, pods still start (`optional: true`), just without
   the variables.
-- Uninstall: `sudo rm /usr/local/bin/pluginctl-nodeinfo`.
-
-**Component 3 (pywaggle2-nodeinfo)** has no install step. Its `read_node_info()`
-is copied into the plugin images (sage-yolo2 and sage-bioclip2 `node_info.py`; see
-[VENDORED.md](https://github.com/flint-pete/sage-yolo2/blob/master/VENDORED.md)).
-media-sampler3's `nodemeta.py` implements the same rules. Contract:
-[DESIGN](https://github.com/flint-pete/pywaggle2-nodeinfo/blob/master/DESIGN.md).
-
-> **Installing WES resets `wes-identity`.** Re-provisioning a node, or running
-> WES's `update-stack.sh`, regenerates the ConfigMap with only its 2 stock values.
-> Re-run Step 2 (`./test-add-configmap.sh`) after any WES (re)install or update;
-> [REBOOT-RECOVERY.md](REBOOT-RECOVERY.md) checks for this.
-
-> **SES jobs (not needed here).** Pods that the WES *scheduler* launches get the
-> same identity only if the scheduler itself is replaced with the patched one
-> ("Tier 2"). That swaps a control-plane component, so it lives in
-> wes-nodeinfo-injection's
-> [node-test/README](https://github.com/flint-pete/wes-nodeinfo-injection/blob/master/node-test/README.md),
-> not in this guide.
+- **Component 3, the reader,** has no install step: each plugin's
+  `requirements.txt` pins `pywaggle==0.57.1`, which provides
+  `waggle.data.node_info_env.read_node_info()` (0.57.0 still imports numpy there).
 
 ---
 
@@ -341,7 +303,7 @@ This uses a CPU base image (`python:3.12-slim`) and builds in about a minute:
 
 ```bash
 cd ~/AI-projects/media-sampler3
-make sideload       # = sudo podman build -t localhost/media-sampler3:0.1.1 .
+make sideload       # = sudo podman build -t localhost/media-sampler3:0.2.0 .
                     #   + podman save | sudo k3s ctr images import -
                     #   + confirm the image is listed
 ```
@@ -373,8 +335,8 @@ Notes:
   about 7 minutes on H041 and loads the node's disk I/O (SSH may feel sluggish).
   Build bioclip2 right after yolo2 so it reuses the cached CUDA base layer.
 - sage-birdnet2 is small and CPU-only (`python:3.12-slim` + BirdNET/TensorFlow).
-- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.1.1`,
-  `.../sage-bioclip2:2.1.0` and `.../sage-birdnet2:2.0.1`. That's only the side-loaded image's *name*;
+- The resulting names are `registry.sagecontinuum.org/beckman/sage-yolo2:2.2.0`,
+  `.../sage-bioclip2:2.2.0` and `.../sage-birdnet2:2.1.0`. That's only the side-loaded image's *name*;
   nothing is pulled from the registry.
 - More detail:
   [sage-yolo2 DOCKER-BUILD](https://github.com/flint-pete/sage-yolo2/blob/master/DOCKER-BUILD.md).
@@ -387,7 +349,7 @@ One sequence, whether or not a camera is attached yet: check the producer (6a),
 prove both chains with a known bird image and a known bird-song clip (6b–6g),
 then attach the live camera (6h).
 
-Every launch is `sudo pluginctl-nodeinfo run`, and two flags appear on every one:
+Every launch is `sudo pluginctl run`, and two flags appear on every one:
 
 - `--selector zone=core` is required because the pods mount a host directory (`-v`).
 - `-v /media/plugin-data/local-cache:/local-cache` is what gives the pod the
@@ -410,10 +372,10 @@ mount, the node identity and the heartbeat path to Beehive all work:
 
 ```bash
 umask 077; printf 'CAMERA_USER=dummy\nCAMERA_PASSWORD=dummy\n' > ~/ms3-dummy-creds.env
-sudo pluginctl-nodeinfo run --name ms3-smoke --selector zone=core \
+sudo pluginctl run --name ms3-smoke --selector zone=core \
   --env-from ~/ms3-dummy-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.1 -- \
+  localhost/media-sampler3:0.2.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name smoke \
   --cache-max-count 20 --heartbeat-secs 20 \
@@ -421,7 +383,7 @@ sudo pluginctl-nodeinfo run --name ms3-smoke --selector zone=core \
 sleep 60; sudo k3s kubectl logs ms3-smoke | tail -4
 #   "capture skipped: capture timeout ..." every 10 s, and
 #   "heartbeat: ... status=skip" every 20 s. The pod stays Running.
-#   There must be NO "node VSN not resolvable" warning (Step 3 working).
+#   There must be NO "node VSN not resolvable" warning (Steps 2-3 working).
 q env.mediasampler.cache.written     # rows with "task":"ms3-smoke"
 ```
 
@@ -465,11 +427,11 @@ GPU consumers **must** set a memory limit, or the kernel kills them (OOMKilled,
 exit 137):
 
 ```bash
-sudo pluginctl-nodeinfo run --name sage-yolo2-consumer --selector zone=core \
+sudo pluginctl run --name sage-yolo2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-yolo2 \
-  registry.sagecontinuum.org/beckman/sage-yolo2:2.1.1 -- \
+  registry.sagecontinuum.org/beckman/sage-yolo2:2.2.0 -- \
   --source cache --input /local-cache/camera/top \
   --every 5m --all-unseen --max-frames 0 \
   --model yolo11x.pt --conf-thres 0.25 --classes bird \
@@ -510,11 +472,11 @@ just slower (YOLO11x took about 2 s per frame).
 ### 6d. Run sage-bioclip2 (species classifier)
 
 ```bash
-sudo pluginctl-nodeinfo run --name sage-bioclip2-consumer --selector zone=core \
+sudo pluginctl run --name sage-bioclip2-consumer --selector zone=core \
   --resource limit.memory=16Gi,request.memory=4Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-bioclip2 \
-  registry.sagecontinuum.org/beckman/sage-bioclip2:2.1.0 -- \
+  registry.sagecontinuum.org/beckman/sage-bioclip2:2.2.0 -- \
   --source cache --input /local-cache/camera-crops/top-crop-0 \
   --every 10m --all-unseen --max-frames 0 --rank Species --min-confidence 0.1 &
 ```
@@ -537,11 +499,11 @@ Good to know:
 ### 6e. Run sage-birdnet2 (audio classifier)
 
 ```bash
-sudo pluginctl-nodeinfo run --name sage-birdnet2-consumer --selector zone=core \
+sudo pluginctl run --name sage-birdnet2-consumer --selector zone=core \
   --resource limit.memory=2Gi,request.memory=1Gi \
   -v /media/plugin-data/local-cache:/local-cache \
   -e WAGGLE_JOB_NAME=camera -e WAGGLE_TASK_NAME=sage-birdnet2 \
-  registry.sagecontinuum.org/beckman/sage-birdnet2:2.0.1 -- \
+  registry.sagecontinuum.org/beckman/sage-birdnet2:2.1.0 -- \
   --source cache --input /local-cache/camera-audio/mic \
   --every 10m --all-unseen --max-frames 0 --min-confidence 0.6 &
 ```
@@ -649,10 +611,10 @@ chmod 600 ~/ms3-cam-creds.env
 Launch the producer:
 
 ```bash
-sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
+sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.1 -- \
+  localhost/media-sampler3:0.2.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -672,7 +634,7 @@ What the naming flags do:
   (`top-crop-N`).
 - `--stream` is the stream label, and it is **required**. It's used for the names
   only when `--name` is omitted.
-- Optional: `--plugin-version localhost/media-sampler3:0.1.1` records the image
+- Optional: `--plugin-version localhost/media-sampler3:0.2.0` records the image
   version in each frame (otherwise `media-sampler3:dev`).
 
 On H041 the producer wrote 3840×2160 JPEGs (240–370 KB) every 10 s.
@@ -689,10 +651,10 @@ a `<clip>.flac.json` metadata sidecar that includes the node's GPS. It was prove
 on H00F.
 
 ```bash
-sudo pluginctl-nodeinfo run --name camera-audio-producer --selector zone=core \
+sudo pluginctl run --name camera-audio-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.1 -- \
+  localhost/media-sampler3:0.2.0 -- \
   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
   --camera-host "$CAM_IP" --camera-port 80 \
   --audio-format flac --bandpass-fmax 8000 \
@@ -722,14 +684,16 @@ and consumers with the same commands as Step 6.
 ## Known limitations and open items
 
 - The stack is side-loaded, so it isn't reboot-durable (see REBOOT-RECOVERY.md).
-  The lasting fix is publishing the images to the registry and folding the
-  nodeinfo change (ConfigMap generator, patched scheduler and `pluginctl`) into
+  The lasting fix is publishing the images to the registry and folding
+  wes-local-cache-manager (and the `/media/plugin-data/local-cache` directory) into
   the WES base stack. That's CI-team work, tracked in
   [sage-design-planning](https://github.com/flint-pete/sage-design-planning).
+  (Node identity already made that move: it is in WES/pywaggle since Nov 2026.)
 - bioclip2 classifies only `top-crop-0` per instance (6d).
 - Hand-seeded test frames and clips are reprocessed on every wake (6g).
 - bioclip2 keeps its seen-store under `.state/sage-yolo2/...` (a quirk of the
   shared consumer code; see the sage-bioclip2 README).
 - The SES job files in `jobs/` are untested templates.
 - The audio producer has only been run on H00F. On H039, sage-birdnet2 is verified
-  with a seeded clip; the live microphone end to end is still to do.
+  with a seeded clip; the live microphone end to end is still to do (planned on H019;
+  H00F's cameras have been retasked).

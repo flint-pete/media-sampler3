@@ -107,7 +107,7 @@ def test_explicit_vsn_not_flagged_placeholder(tmp_path, monkeypatch):
 
 
 def test_runtime_identity_reads_injected_env(monkeypatch):
-    # The WES wes-nodeinfo-injection change projects these 5 env vars into the pod.
+    # WES (697e338+, SES 0.29.2) projects these env vars into every pod; pywaggle reads them.
     # _runtime_identity() reads them with sentinel->None normalization.
     monkeypatch.setenv("WAGGLE_NODE_VSN", "H00F")
     monkeypatch.setenv("WAGGLE_NODE_ID", "00004cbb4701d16c")
@@ -130,6 +130,7 @@ def test_runtime_identity_reads_injected_env(monkeypatch):
     ({"WAGGLE_NODE_GPS_LAT": "notafloat"}, {"lat": None}),
     ({"WAGGLE_NODE_GPS_LAT": "91"}, {"lat": None}),     # out of range
     ({"WAGGLE_NODE_GPS_LON": "181"}, {"lon": None}),
+    ({"WAGGLE_NODE_GPS_LAT": ""}, {"lat": None}),       # upstream WES missing-coord value
 ])
 def test_runtime_identity_sentinels_to_none(monkeypatch, env, expect):
     for k in ("WAGGLE_NODE_VSN", "WAGGLE_NODE_ID",

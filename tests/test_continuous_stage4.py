@@ -136,9 +136,24 @@ def test_continuous_writes_into_ring_and_bounds(tmp_path, monkeypatch, clk):
     monkeypatch.setenv("CAMERA_PASSWORD", "p")
     # distinct capture timestamps so filenames don't collide across ticks
     seq = iter(range(1000, 2000))
-    monkeypatch.setattr(metadata, "now_capture_ts_ns", lambda: next(seq))
+    drawn = []
 
-    rc = app._continuous_to_cache(_args(tmp_path), max_ticks=5,
+    def _next_ts():
+        drawn.append(next(seq))
+        return drawn[-1]
+    monkeypatch.setattr(metadata, "now_capture_ts_ns", _next_ts)
+
+    # Inject a recording plugin: never open a real pywaggle Plugin in a unit test
+    # (with pywaggle installed it would, and its heartbeat draws a timestamp too).
+    class _RecPlugin:
+        def __init__(self):
+            self.ts = set()
+
+        def publish(self, name, value, timestamp=None, meta=None):
+            self.ts.add(timestamp)
+    rec = _RecPlugin()
+
+    rc = app._continuous_to_cache(_args(tmp_path), max_ticks=5, plugin=rec,
                                   monotonic=clk.monotonic_ns, sleep=clk.sleep)
     assert rc == app.EXIT_OK
 
@@ -146,9 +161,11 @@ def test_continuous_writes_into_ring_and_bounds(tmp_path, monkeypatch, clk):
     ring = cache.scan_ring(sdir)
     # cap is 3 -> ring holds exactly 3 after 5 ticks
     assert ring.count == 3
-    # newest 3 kept (ts 1004,1003,1002 written last); oldest evicted
+    # newest 3 frames kept; oldest evicted (heartbeat timestamps are not frames)
+    frames = [t for t in drawn if t not in rec.ts]
+    assert len(frames) == 5
     kept = sorted(m.capture_ts_ns for m in ring.members)
-    assert kept == [1002, 1003, 1004]
+    assert kept == frames[-3:]
     # no .tmp litter
     assert not any(n.endswith(".tmp") for n in os.listdir(sdir))
 

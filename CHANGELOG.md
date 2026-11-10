@@ -15,6 +15,33 @@ preserved in
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
+Image `localhost/media-sampler3:0.2.0`.
+
+### Changed
+- **Node identity via upstream pywaggle.** The CI team merged our node-identity work
+  (Nov 2026): WES 697e338 / SES-pluginctl 0.29.2 inject `wes-identity`
+  (`WAGGLE_NODE_{ID,VSN,GPS_LAT,GPS_LON}`) into every plugin pod, and pywaggle
+  0.57.1 ships the reader (`waggle.data.node_info_env.read_node_info`).
+  `nodemeta._runtime_identity()` now delegates to it (fail-soft to all-None if the
+  module is missing); precedence (CLI > env > host manifest/files) and the return
+  shape are unchanged. `requirements.txt` pins `pywaggle == 0.57.1`.
+  Upstream writes `""` for missing coords (not `999`) and no `WAGGLE_NODE_MOBILITY`;
+  both are handled (new test case for `""`).
+- `make test` now (re)builds `.venv-test` from `requirements.txt` when it changes.
+- Run commands use the stock `sudo pluginctl run`; `pluginctl-nodeinfo` is retired.
+
+### Fixed
+- `tests/test_continuous_stage4.py::test_continuous_writes_into_ring_and_bounds` opened a
+  REAL pywaggle `Plugin` when pywaggle was installed; its heartbeat drew an extra
+  timestamp and shifted the expected ring window by one. The test now injects a
+  recording fake plugin and checks the newest 3 *frames*. (Pre-existing; only
+  visible when pywaggle + Pillow are both in the test venv.)
+
+### Pending verification
+- On-node run on **H019** (new test node; H00F's cameras were retasked).
+
 ## [0.1.1] - 2026-10-02
 
 Image `localhost/media-sampler3:0.1.1`. The producer code is unchanged from 0.1.0;

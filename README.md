@@ -18,17 +18,18 @@ It is the hub of a six-component media stack:
 Related repos:
 
 - [wes-local-cache-manager](https://github.com/flint-pete/wes-local-cache-manager) bounds `/local-cache`
-- [wes-nodeinfo-injection](https://github.com/flint-pete/wes-nodeinfo-injection) and [pywaggle2-nodeinfo](https://github.com/flint-pete/pywaggle2-nodeinfo) provide node identity
+- Node identity comes from WES (>= 697e338, `wes-identity` in every pod) and pywaggle (>= 0.57.1, `waggle.data.node_info_env`); both merged upstream in Nov 2026 from our former wes-nodeinfo-injection / pywaggle2-nodeinfo
 - [sage-yolo2](https://github.com/flint-pete/sage-yolo2) → [sage-bioclip2](https://github.com/flint-pete/sage-bioclip2) are the example consumers
 
 ## Status
 
+**v0.2.0** (2026-11-10): node identity now via upstream pywaggle 0.57.1 (see CHANGELOG); on-node verification on H019 pending.
 **v0.1.1** (2026-10-02). The image path has been in production on H00F since 2026-07-23. The
 full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
 cameras in Sep 2026, and the install guide was re-run from scratch on H039 (no
 cameras) in Oct 2026. The audio path was validated on H00F (camera mic, 15 s FLAC
 once a minute). Its consumer, [sage-birdnet2](https://github.com/flint-pete/sage-birdnet2),
-identified a seeded bird-song clip on H039 (Oct 2026). `make test` (creates its own `.venv-test` on first run): 237 passed,
+identified a seeded bird-song clip on H039 (Oct 2026). `make test` (creates its own `.venv-test` on first run): 238 passed,
 8 skipped (the skipped image tests need PIL, which the test venv doesn't have).
 
 ## Core concepts
@@ -74,18 +75,18 @@ frames that no consumer could ever read would be worse than failing.
 ## Running it
 
 On a node, media-sampler3 runs as a side-loaded image, launched with
-`pluginctl-nodeinfo` (the patched `pluginctl` from install Step 3, so the pod gets
-the node's VSN and GPS). The full, verified commands are in
+the stock `pluginctl` (>= 0.29.2, install Step 3; the pod gets the node's VSN and
+GPS from WES). The full, verified commands are in
 [INSTALLING-MEDIA-SAMPLER3.md](INSTALLING-MEDIA-SAMPLER3.md) Steps 4 and 6h. The
 image producer for one camera:
 
 ```bash
 make sideload        # on the node: build + import localhost/media-sampler3:<version>
 
-sudo pluginctl-nodeinfo run --name camera-producer --selector zone=core \
+sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.1.1 -- \
+  localhost/media-sampler3:0.2.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -169,13 +170,13 @@ password never appears in `ps`, shell history, or the pod spec.
 `--node-manifest`. Identity is resolved in this order:
 
 1. flags
-2. the `WAGGLE_NODE_*` env (from wes-nodeinfo-injection)
+2. the `WAGGLE_NODE_*` env (WES `wes-identity`, read via pywaggle's `node_info_env`)
 3. `/etc/waggle` files
 4. the placeholder `NODE`
 
-Launched with `pluginctl-nodeinfo` (install Step 3), the pod has the env, so no
-identity flags are needed; use them only to override. A pod from the stock
-`pluginctl` gets neither the env nor the files and would record VSN `NODE`, so
+On a node with WES 697e338+ / pluginctl 0.29.2+ (install Steps 2-3) every pod has
+the env, so no identity flags are needed; use them only to override. On an older
+node the pod gets neither the env nor the files and would record VSN `NODE`, so
 there you'd pass `--vsn` (and `--lat`/`--lon` for GPS). Details:
 [docs/HOW-IT-WORKS.md §4](docs/HOW-IT-WORKS.md#4-node-identity-where-vsn-and-gps-come-from).
 
