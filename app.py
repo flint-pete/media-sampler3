@@ -227,6 +227,19 @@ def build_parser():
         action='store', default=int(os.environ.get('CAMERA_CHANNEL', "0")), type=int,
         help='Camera channel (default env CAMERA_CHANNEL or 0).')
     parser.add_argument(
+        '--camera-vendor', dest='camera_vendor', metavar='VENDOR',
+        action='store', default=os.environ.get('CAMERA_VENDOR', 'reolink'),
+        choices=acquire.VENDORS,
+        help='Camera API for native stills: reolink (cmd=Snap, default) or hanwha '
+             '(SUNAPI snapshot, HTTP Digest auth). Default env CAMERA_VENDOR or reolink.')
+    parser.add_argument(
+        '--camera-profile', dest='camera_profile', metavar='N',
+        action='store', type=int,
+        default=(int(os.environ['CAMERA_PROFILE']) if os.environ.get('CAMERA_PROFILE')
+                 else None),
+        help='Hanwha only: video profile whose resolution the snapshot uses (default '
+             'env CAMERA_PROFILE, else the camera\'s default profile).')
+    parser.add_argument(
         '--capture-timeout', dest='capture_timeout', metavar='SECONDS',
         action='store', default=float(os.environ.get('CAPTURE_TIMEOUT', "10")), type=float,
         help='Hard timeout (seconds) for a single capture (default 10).')
@@ -343,6 +356,10 @@ def validate_args(args):
             raise ConfigError("--source-type camera_still is an image source; use "
                               "camera_mic / usb_mic / rtsp_audio / file with "
                               "--media audio")
+        if st == "camera_mic" and getattr(args, "camera_vendor", "reolink") != "reolink":
+            raise ConfigError("--source-type camera_mic is Reolink-only (camera FLV "
+                              "audio); --camera-vendor %s has no supported camera "
+                              "audio -- use usb_mic / rtsp_audio" % args.camera_vendor)
         if st == "camera_mic":
             # camera mic builds its URL from --camera-host + ENV creds (no CLI
             # password); --audio-source is not used for this source type.
@@ -473,7 +490,7 @@ def _one_shot_from_camera(args):
     """One-shot from camera -> Beehive upload (Stage 3).
 
     Resolves node identity (flags override; runtime lookup is a sage-ci
-    placeholder today), builds the Reolink URL from env-only credentials, then
+    placeholder today), builds the vendor still source (Reolink URL / Hanwha digest) from env-only credentials, then
     captures + embeds + uploads with capture-time keying. Fail-fast on config
     (missing camera host/creds); fail-soft on runtime. Node identity is never
     fatal -- Beehive attributes the node via routing.
@@ -511,8 +528,10 @@ def _one_shot_from_camera(args):
     camera_name = (args.name[0] if args.name else args.stream[0])
 
     try:
-        url = acquire.build_reolink_snap_url(
-            args.camera_host, args.camera_port, user, password, args.camera_channel)
+        url = acquire.build_still_source(
+            getattr(args, "camera_vendor", "reolink"), args.camera_host,
+            args.camera_port, user, password, channel=args.camera_channel,
+            profile=getattr(args, "camera_profile", None))
     except ValueError as e:
         logger.error("config error: %s", e)
         return EXIT_CONFIG_ERROR
@@ -580,8 +599,10 @@ def _resolve_camera_config(args):
         manifest_path=args.node_manifest)
     camera_name = (args.name[0] if args.name else args.stream[0])
     try:
-        url = acquire.build_reolink_snap_url(
-            args.camera_host, args.camera_port, user, password, args.camera_channel)
+        url = acquire.build_still_source(
+            getattr(args, "camera_vendor", "reolink"), args.camera_host,
+            args.camera_port, user, password, channel=args.camera_channel,
+            profile=getattr(args, "camera_profile", None))
     except ValueError as e:
         raise ConfigError(str(e))
     return url, ident, camera_name

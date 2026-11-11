@@ -15,6 +15,40 @@ preserved in
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
+Image `localhost/media-sampler3:0.3.0`.
+
+### Added
+- **Hanwha (Wisenet) camera support: `--camera-vendor hanwha`** (env
+  `CAMERA_VENDOR`; the default stays `reolink`, so existing jobs are unchanged).
+  It fetches the camera's native JPEG from the SUNAPI snapshot endpoint
+  (`/stw-cgi/video.cgi?msubmenu=snapshot&action=view[&Profile=N]&Channel=C`)
+  with HTTP Digest auth, which an XNP-6400RW requires (`Digest`, MD5,
+  `qop="auth"`, checked on H03B). No new dependency: stdlib urllib.
+  - The credentials never appear in the URL, `repr()` or logs (`HanwhaStill`
+    keeps them out of band).
+  - **One login try per capture.** The stdlib digest handler silently retries a
+    rejected password up to 5 more times per request, which on its own can trip
+    Hanwha's account lockout; `_OneShotDigestAuthHandler` stops that.
+  - **Auth backoff.** After a rejection the source doesn't contact the camera for
+    60 s, doubling to 15 min, and raises `CaptureAuthError` (a `CaptureError`, so
+    the continuous loop stays fail-soft). Success resets it.
+- `--camera-profile N` (env `CAMERA_PROFILE`), Hanwha only: the video profile
+  whose resolution the snapshot uses.
+- `acquire.build_still_source(vendor, ...)`: returns the Reolink URL (unchanged)
+  or a `HanwhaStill`; `fetch_raw_still()` accepts either.
+- Tests: `tests/test_acquire_hanwha.py` and `tests/test_app_hanwha.py` run
+  against a real local Digest-auth server, including end to end into the ring and
+  a bad-password run that confirms only one login attempt reaches the camera.
+
+### Changed
+- `--source-type camera_mic` with `--camera-vendor hanwha` is now a config error
+  (camera audio is Reolink-only; the XNP-6400RW has no microphone).
+- INSTALLING step 6h: a Hanwha section covering how to find the camera (the WES
+  provisioner only scans `.10`-`.20`), a one-shot password check, launch, and
+  lockout behavior.
+
 ## [0.2.0] - 2026-11-10
 
 Image `localhost/media-sampler3:0.2.0`.

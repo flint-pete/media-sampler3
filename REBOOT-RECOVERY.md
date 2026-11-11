@@ -93,7 +93,7 @@ sudo k3s kubectl get pods -l app.kubernetes.io/name=wes-local-cache-manager
 sudo k3s ctr images ls -q | grep -E 'media-sampler3|sage-yolo2|sage-bioclip2|sage-birdnet2|wes-local-cache-manager'
 ```
 
-Expect `localhost/media-sampler3:0.2.0`, `.../sage-yolo2:2.2.0`,
+Expect `localhost/media-sampler3:0.3.0`, `.../sage-yolo2:2.2.0`,
 `.../sage-bioclip2:2.2.0`, `.../sage-birdnet2:2.1.0`, and the cache manager.
 Rebuild anything missing:
 
@@ -155,7 +155,7 @@ so each launch ends with `&`.
 sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -164,7 +164,7 @@ sudo pluginctl run --name camera-producer --selector zone=core \
 sudo pluginctl run --name camera-audio-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
   --camera-host "$CAM_IP" --camera-port 80 \
   --audio-format flac --bandpass-fmax 8000 \

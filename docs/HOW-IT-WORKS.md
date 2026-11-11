@@ -192,7 +192,7 @@ All modules live at the repo root and are copied into the image by the
 | File | Purpose | Key functions |
 |------|---------|---------------|
 | `app.py` | CLI and orchestration. Parses and validates flags, then runs one mode. Exit codes: 0 ok, 2 config error, 3 capture error. | `build_parser`, `validate_args`, `main`, `_continuous_to_cache` (producer loop), `run_dual_grid_loop` (capture and heartbeat timing), `_one_shot_from_camera`, `_one_shot_from_cache` |
-| `acquire.py` | Fetches one native JPEG from a Reolink over HTTP (`cmd=Snap`). No decode or re-encode. Redacts passwords in logs. | `build_reolink_snap_url`, `fetch_raw_still` |
+| `acquire.py` | Fetches one native JPEG from the camera over HTTP: Reolink `cmd=Snap` (credentials in the query) or Hanwha SUNAPI snapshot (HTTP Digest; one login try per capture, auth backoff against account lockout). No decode or re-encode. Redacts passwords in logs. | `build_still_source`, `HanwhaStill`, `build_reolink_snap_url`, `fetch_raw_still` |
 | `audio_acquire.py` | Records one bounded clip by running ffmpeg. The camera mic uses the HTTP-FLV sub-stream; a USB mic uses ALSA. Timeout = clip length + 15 s. | `build_reolink_flv_url`, `build_ffmpeg_cmd`, `capture_clip` |
 | `metadata.py` | The v2 naming contract and the image EXIF provenance. | `build_v2_name`, `parse_v2_name`, `build_field_dict`, `embed_all` |
 | `audio_metadata.py` | The audio versions: clip name and JSON sidecar. | `build_audio_name`, `build_audio_field_dict`, `write_sidecar` |

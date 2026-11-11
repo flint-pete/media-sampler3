@@ -61,7 +61,7 @@ Each repo's README explains its code and has a "where this fits" section that
 links back here.
 
 Step 0 clones `master` of the five repos. The images it builds are
-`localhost/media-sampler3:0.2.0`, `.../sage-yolo2:2.2.0`, `.../sage-bioclip2:2.2.0`
+`localhost/media-sampler3:0.3.0`, `.../sage-yolo2:2.2.0`, `.../sage-bioclip2:2.2.0`
 and `.../sage-birdnet2:2.1.0`.
 
 ---
@@ -303,7 +303,7 @@ This uses a CPU base image (`python:3.12-slim`) and builds in about a minute:
 
 ```bash
 cd ~/AI-projects/media-sampler3
-make sideload       # = sudo podman build -t localhost/media-sampler3:0.2.0 .
+make sideload       # = sudo podman build -t localhost/media-sampler3:0.3.0 .
                     #   + podman save | sudo k3s ctr images import -
                     #   + confirm the image is listed
 ```
@@ -375,7 +375,7 @@ umask 077; printf 'CAMERA_USER=dummy\nCAMERA_PASSWORD=dummy\n' > ~/ms3-dummy-cre
 sudo pluginctl run --name ms3-smoke --selector zone=core \
   --env-from ~/ms3-dummy-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name smoke \
   --cache-max-count 20 --heartbeat-secs 20 \
@@ -614,7 +614,7 @@ Launch the producer:
 sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -634,10 +634,82 @@ What the naming flags do:
   (`top-crop-N`).
 - `--stream` is the stream label, and it is **required**. It's used for the names
   only when `--name` is omitted.
-- Optional: `--plugin-version localhost/media-sampler3:0.2.0` records the image
+- Optional: `--plugin-version localhost/media-sampler3:0.3.0` records the image
   version in each frame (otherwise `media-sampler3:dev`).
 
 On H041 the producer wrote 3840×2160 JPEGs (240–370 KB) every 10 s.
+
+**Hanwha (Wisenet) cameras, e.g. the XNP-6400RW PTZ on H03B.** Add
+`--camera-vendor hanwha`. media-sampler3 then fetches the camera's own JPEG through
+Hanwha's SUNAPI (`/stw-cgi/video.cgi?msubmenu=snapshot&action=view`) using **HTTP
+Digest** auth. The URL never carries the password; it's the same mode-600 env file.
+
+1. **Find the camera.** Don't rely on the manifest or WES: the WES camera
+   provisioner only scans `10.31.81.10`-`.20`, so a Hanwha that got a higher DHCP
+   address (H03B's is `.32`) is never registered and has no URI in the manifest.
+   Look on the node's camera network instead (Hanwha's MAC vendor shows up):
+
+   ```bash
+   sudo nmap -sn -n 10.31.81.0/24 | grep -B2 -i hanwha
+   CAM_IP=<CAM_IP>
+   curl -s -o /dev/null -D - "http://$CAM_IP/stw-cgi/video.cgi?msubmenu=snapshot&action=view" \
+     | grep -i -E '^HTTP|^WWW-Authenticate'
+   #   -> HTTP/1.1 401 Unauthorized
+   #      WWW-Authenticate: Digest realm="iPolis_...", ... qop="auth"
+   ```
+
+   The address comes from DHCP, so recheck it after the camera or node reboots.
+
+2. **Credentials:** the same `CAMERA_USER`/`CAMERA_PASSWORD` env file as above.
+   Prefer a dedicated non-admin camera user that's allowed to view video, if you
+   can create one in the camera's web UI.
+
+3. **Test one frame before running continuously.** Hanwha cameras lock an account
+   after repeated failed logins, so check the password once with a one-shot run.
+   It captures one frame and uploads it to Beehive (with the node's GPS), then
+   exits:
+
+   ```bash
+   sudo pluginctl run --name hanwha-test --selector zone=core \
+     --env-from ~/ms3-cam-creds.env \
+     localhost/media-sampler3:0.3.0 -- \
+     --one-shot --stream ptz --name ptz \
+     --camera-vendor hanwha --camera-host "$CAM_IP" --camera-port 80
+   ```
+
+   Read its log (`sudo pluginctl logs hanwha-test`) for `captured N bytes (valid
+   JPEG)` and `one-shot: uploaded`, then `sudo pluginctl rm hanwha-test`.
+   If the camera rejects the password, the log says `camera rejected credentials
+   (HTTP 401)`.
+
+4. **Launch** exactly like the Reolink producer above, plus `--camera-vendor
+   hanwha` (and `--name ptz` or similar):
+
+   ```bash
+   sudo pluginctl run --name camera-producer --selector zone=core \
+     --env-from ~/ms3-cam-creds.env \
+     -v /media/plugin-data/local-cache:/local-cache \
+     localhost/media-sampler3:0.3.0 -- \
+     --continuous 10 --media image --stream ptz --name ptz \
+     --cache-root /local-cache --cache-name camera \
+     --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
+     --camera-vendor hanwha --camera-host "$CAM_IP" --camera-port 80 &
+   # frames land in /local-cache/camera/ptz/ -> run yolo2 with --input /local-cache/camera/ptz
+   ```
+
+How it behaves:
+
+- **Each capture tries the password once.** After a rejection the producer doesn't
+  contact the camera again for 60 s, doubling up to 15 min, so a wrong password
+  can't lock the account; captures in that window log `backing off`. A successful
+  capture resets this.
+- `--camera-profile N` picks the video profile whose resolution the snapshot uses.
+  By default the camera uses its own default profile.
+- **No audio.** The XNP-6400RW has no built-in microphone; `--source-type camera_mic`
+  is Reolink-only and is refused with `--camera-vendor hanwha`. Use a USB mic
+  (`usb_mic`) for audio on such a node.
+- It's a PTZ: frames show wherever the camera is currently pointed, and
+  media-sampler3 does not move it.
 
 **More cameras.** Run one producer per camera with its own `--name` (for example
 `side`, giving `camera/side/`), its own pod `--name`, and its own `--camera-host`.
@@ -654,7 +726,7 @@ on H00F.
 sudo pluginctl run --name camera-audio-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 60 --clip-seconds 15 --media audio --source-type camera_mic \
   --camera-host "$CAM_IP" --camera-port 80 \
   --audio-format flac --bandpass-fmax 8000 \
@@ -694,6 +766,12 @@ and consumers with the same commands as Step 6.
 - bioclip2 keeps its seen-store under `.state/sage-yolo2/...` (a quirk of the
   shared consumer code; see the sage-bioclip2 README).
 - The SES job files in `jobs/` are untested templates.
+- Hanwha support (0.3.0) is tested against a local Digest-auth test server only; the
+  first live run is planned on H03B (XNP-6400RW). The exact snapshot path is
+  confirmed only once a real capture with credentials succeeds.
+- The WES camera provisioner doesn't find cameras outside `10.31.81.10`-`.20`, so
+  such a camera has no WES stream (`pywaggle Camera("ptz")` won't work); our
+  producer uses the IP directly, so it isn't affected.
 - The audio producer has only been run on H00F. On H039, sage-birdnet2 is verified
   with a seeded clip; the live microphone end to end is still to do (planned on H019;
   H00F's cameras have been retasked).

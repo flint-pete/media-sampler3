@@ -86,7 +86,7 @@ make sideload        # on the node: build + import localhost/media-sampler3:<ver
 sudo pluginctl run --name camera-producer --selector zone=core \
   --env-from ~/ms3-cam-creds.env \
   -v /media/plugin-data/local-cache:/local-cache \
-  localhost/media-sampler3:0.2.0 -- \
+  localhost/media-sampler3:0.3.0 -- \
   --continuous 10 --media image --stream top_camera --name top \
   --cache-root /local-cache --cache-name camera \
   --cache-max-count 200 --cache-max-mb 500 --heartbeat-secs 60 \
@@ -147,6 +147,8 @@ camera's HTTP port, recorded with ffmpeg. Credentials come from the env:
 | `--camera-host HOST` | Camera IP (default env `CAMERA_HOST`). |
 | `--camera-port PORT` | Camera **HTTP** port (default env `CAMERA_PORT`, else 80). Used for both the snapshot API and the FLV audio stream. |
 | `--camera-channel N` | Camera channel (default 0). |
+| `--camera-vendor V` | `reolink` (default; `cmd=Snap`) or `hanwha` (SUNAPI snapshot, HTTP Digest auth). Default env `CAMERA_VENDOR`. Hanwha: one login try per capture, then a 60 s-15 min backoff after a rejection, to avoid account lockout. See INSTALLING step 6h. |
+| `--camera-profile N` | Hanwha only: video profile for the snapshot resolution (default env `CAMERA_PROFILE`, else the camera's default). |
 | `--capture-timeout S` | Timeout for fetching an image still. |
 
 **Credentials are env-only:** `CAMERA_USER` / `CAMERA_PASSWORD`, passed via
