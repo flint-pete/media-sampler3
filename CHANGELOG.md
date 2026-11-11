@@ -19,6 +19,15 @@ preserved in
 
 Image `localhost/media-sampler3:0.3.0`.
 
+**Verified live on H03B (2026-11-10)** against its Hanwha XNP-6400RW at 10.31.81.32:
+- The snapshot path and Digest login worked on the first attempt.
+- The one-shot capture was 317,867 bytes and took 1.7 s, uploaded as
+  `…-v2-H03B-ptz.jpg`; the node's upload agent reported it done.
+- A 2-frame continuous run wrote to the ring cache.
+- Native 1920×1080 JPEGs, with EXIF GPS 42.5369, -72.1727 from WES `wes-identity`.
+- The Beehive record check is pending: the Sage data API was returning 500
+  (InfluxDB backend down).
+
 ### Added
 - **Hanwha (Wisenet) camera support: `--camera-vendor hanwha`** (env
   `CAMERA_VENDOR`; the default stays `reolink`, so existing jobs are unchanged).

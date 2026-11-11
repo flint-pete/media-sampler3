@@ -23,7 +23,7 @@ Related repos:
 
 ## Status
 
-**v0.2.0** (2026-11-10): node identity now via upstream pywaggle 0.57.1 (see CHANGELOG); on-node verification on H019 pending.
+**v0.3.0** (2026-11-10): Hanwha camera support (`--camera-vendor hanwha`), verified live on H03B's XNP-6400RW: one-shot upload and continuous ring capture, native 1920×1080 JPEGs with EXIF GPS from the node's `wes-identity`. v0.2.0: node identity via upstream pywaggle 0.57.1. See CHANGELOG.
 **v0.1.1** (2026-10-02). The image path has been in production on H00F since 2026-07-23. The
 full cascade (producer → yolo2 → bioclip2) was re-verified on H041 with two
 cameras in Sep 2026, and the install guide was re-run from scratch on H039 (no

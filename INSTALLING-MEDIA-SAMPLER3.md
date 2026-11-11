@@ -15,9 +15,13 @@ Every command here was run on live Thor nodes:
   bird image and the seeded bird-song clip (*Sialia sialis*), with results reaching
   Beehive. The live-camera step (6h) is next.
 - H038 was the first attempt (see the prerequisite note).
-- **H019 (Nov 2026, in progress):** first install on a node whose WES provides
+- **H03B (Nov 2026, in progress):** first install on a node whose WES provides
   node identity natively (SES/pluginctl 0.29.2), with the consumers on upstream
-  pywaggle 0.57.1. Steps 2–3 below are now checks, not installs.
+  pywaggle 0.57.1, so Steps 2–3 below are now checks, not installs. Also the first
+  **Hanwha** camera (XNP-6400RW PTZ, media-sampler3 0.3.0 `--camera-vendor hanwha`):
+  a live one-shot upload and a continuous run into the ring both worked (native
+  1920×1080 JPEGs, EXIF GPS = the node's `wes-identity`). Steps 0, 4 and 5 are done.
+  (H019 passed the read-only checks but has no camera, so testing moved to H03B.)
 
 > **GPU.** Thor nodes run pods with NVIDIA's container runtime by default: the
 > Sage CI team set k3s `default-runtime: nvidia` across the fleet in Oct 2026. So a
@@ -766,12 +770,13 @@ and consumers with the same commands as Step 6.
 - bioclip2 keeps its seen-store under `.state/sage-yolo2/...` (a quirk of the
   shared consumer code; see the sage-bioclip2 README).
 - The SES job files in `jobs/` are untested templates.
-- Hanwha support (0.3.0) is tested against a local Digest-auth test server only; the
-  first live run is planned on H03B (XNP-6400RW). The exact snapshot path is
-  confirmed only once a real capture with credentials succeeds.
+- Hanwha support (0.3.0) is verified live on one model only (XNP-6400RW on H03B,
+  2026-11-10). Other Wisenet models should use the same SUNAPI snapshot, but that's
+  untested.
 - The WES camera provisioner doesn't find cameras outside `10.31.81.10`-`.20`, so
   such a camera has no WES stream (`pywaggle Camera("ptz")` won't work); our
   producer uses the IP directly, so it isn't affected.
 - The audio producer has only been run on H00F. On H039, sage-birdnet2 is verified
-  with a seeded clip; the live microphone end to end is still to do (planned on H019;
-  H00F's cameras have been retasked).
+  with a seeded clip; the live microphone end to end is still to do. Neither H019 nor
+  H03B has a microphone (the XNP-6400RW has none), so this needs a node with a
+  Reolink mic or a USB mic; H00F's cameras have been retasked.
